@@ -68,12 +68,25 @@ export default function GanttChart({
       return;
     }
 
-    // Safety checks: check license expire
-    const now = new Date('2026-05-25');
-    const licenseExp = new Date(driverObj.licenseExpiry);
-    if (licenseExp < now) {
-      alert(`SAFETY ALERT: ${driverObj.name}'s driver license expired on ${driverObj.licenseExpiry}! Rectify first.`);
-      return;
+    // Safety checks: check license expire and cargo vehicle mismatch conflicts
+    const activeJob = jobs.find(j => j.id === selectedJobId);
+    if (activeJob) {
+      const currentDate = new Date('2026-05-29'); // Align with active simulated current timestamp
+      const licenseExp = new Date(driverObj.licenseExpiry);
+      
+      if (licenseExp < currentDate) {
+        alert(`SAFETY COMPLIANCE VIOLATION:\nDriver ${driverObj.name}'s professional heavy carrier license expired on ${driverObj.licenseExpiry}! Scheduling is blocked.`);
+        return;
+      }
+
+      // Check for vehicle axle stability type mismatch on heavy container sizes
+      const isHeavyFreight = activeJob.weightKg > 22000;
+      const isLightTractor = matchedVeh.type.toLowerCase().includes('2-axle') || matchedVeh.type.toLowerCase().includes('light');
+
+      if (isHeavyFreight && isLightTractor) {
+        alert(`FLEET CONFLICT ALERT:\nCargo weight (${activeJob.weightKg.toLocaleString()} KG) exceeds safety ratings for standard lighter-duty vehicles. Assigned Prime Mover (${matchedVeh.plateNumber} - ${matchedVeh.type}) cannot pull this container load. Switch driver to a high-capacity 3-Axle prime mover.`);
+        return;
+      }
     }
 
     if (matchedVeh.maintenanceAlert) {

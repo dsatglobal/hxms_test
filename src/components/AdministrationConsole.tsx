@@ -179,17 +179,37 @@ CREATE TABLE system_users (
     tenant_id VARCHAR(50) REFERENCES saas_tenants(id) ON DELETE CASCADE
 );
 
--- 3. GEOSPATIAL LOGISTICS ZONES
+-- 3. GLOBAL SPATIAL & REGIONAL REGISTRY
+CREATE TABLE logistics_regions (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE logistics_countries (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(10) UNIQUE NOT NULL, -- ISO 2-letter standard
+    region_id VARCHAR(50) REFERENCES logistics_regions(id) ON DELETE RESTRICT,
+    currency VARCHAR(10) DEFAULT 'USD',
+    tax_rate NUMERIC(5, 2) DEFAULT 0.00,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. GEOSPATIAL LOGISTICS ZONES
 CREATE TABLE logistics_zones (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     code VARCHAR(50) UNIQUE NOT NULL,
     type VARCHAR(150) NOT NULL DEFAULT 'Industrial Corridor',
     description TEXT,
+    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. CONTAINER TERMINAL & CUSTOMER POINT STATIONS
+-- 5. CONTAINER TERMINAL & CUSTOMER POINT STATIONS
 CREATE TABLE logistics_locations (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -199,10 +219,11 @@ CREATE TABLE logistics_locations (
     longitude NUMERIC(10, 6),
     zone_name VARCHAR(255) REFERENCES logistics_zones(name),
     geofence_radius_meters INT DEFAULT 300,
+    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. FLEET REGISTRY (ASSET ASYNC INDEXING)
+-- 6. FLEET REGISTRY (ASSET ASYNC INDEXING)
 CREATE TABLE fleet_vehicles (
     id VARCHAR(50) PRIMARY KEY,
     plate_number VARCHAR(30) UNIQUE NOT NULL,
@@ -223,7 +244,7 @@ CREATE TABLE fleet_drivers (
     current_status VARCHAR(30) CHECK (current_status IN ('idle', 'assigned', 'in-transit', 'at-site', 'completed')) DEFAULT 'idle'
 );
 
--- 6. COMMERCIAL CUSTOMER AUDIT
+-- 7. COMMERCIAL CUSTOMER AUDIT
 CREATE TABLE customer_masters (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -232,10 +253,11 @@ CREATE TABLE customer_masters (
     credit_limit NUMERIC(12, 2) DEFAULT 50000.00,
     payment_terms VARCHAR(50) DEFAULT 'Net 30',
     email VARCHAR(255),
-    phone VARCHAR(50)
+    phone VARCHAR(50),
+    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL
 );
 
--- 7. BASE TARIFF & BID VALUE MATRIX
+-- 8. BASE TARIFF & BID VALUE MATRIX
 CREATE TABLE billing_tariffs (
     id VARCHAR(50) PRIMARY KEY,
     scenario VARCHAR(10) CHECK (scenario IN ('IMP', 'EXP', 'Inland', 'EMTY', 'RETURN')),
@@ -246,7 +268,7 @@ CREATE TABLE billing_tariffs (
     CONSTRAINT unique_tariff_index UNIQUE (scenario, from_zone, to_zone, size_code)
 );
 
--- 8. JOB EXECUTION PIPELINE
+-- 9. JOB EXECUTION PIPELINE
 CREATE TABLE dispatch_jobs (
     id VARCHAR(50) PRIMARY KEY,
     job_no VARCHAR(50) UNIQUE NOT NULL,
@@ -270,7 +292,7 @@ CREATE TABLE dispatch_jobs (
     billing_status VARCHAR(20) DEFAULT 'pending'
 );
 
--- 9. HISTORICAL ACCOUNTING CONSOLE
+-- 10. HISTORICAL ACCOUNTING CONSOLE
 CREATE TABLE custom_invoices (
     id VARCHAR(50) PRIMARY KEY,
     invoice_no VARCHAR(50) UNIQUE NOT NULL,
@@ -284,7 +306,7 @@ CREATE TABLE custom_invoices (
     total_amount NUMERIC(10, 2)
 );
 
--- 10. REALTIME AUDIT LOGGING INDEX
+-- 11. REALTIME AUDIT LOGGING INDEX
 CREATE INDEX idx_jobs_status ON dispatch_jobs(status);
 CREATE INDEX idx_vehicles_plate ON fleet_vehicles(plate_number);
 CREATE INDEX idx_locations_type ON logistics_locations(type);

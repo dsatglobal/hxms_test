@@ -23,7 +23,11 @@ import {
   WorkflowMilestoneConfig,
   PaymentRecord,
   TariffRate,
-  ScenarioType
+  ScenarioType,
+  SurchargeRule,
+  MilestoneStep,
+  Region,
+  Country
 } from './types';
 import { 
   MOCK_TENANTS, 
@@ -41,7 +45,9 @@ import {
   INITIAL_USERS,
   INITIAL_SMTP_CONFIG,
   INITIAL_EMAIL_TEMPLATES,
-  BASE_TARIFFS
+  BASE_TARIFFS,
+  INITIAL_REGIONS,
+  INITIAL_COUNTRIES
 } from './data';
 
 // Components
@@ -62,6 +68,12 @@ import WorkflowStatusManager from './components/WorkflowStatusManager';
 import PaymentsConsole from './components/PaymentsConsole';
 import AdministrationConsole from './components/AdministrationConsole';
 
+// New standalone views
+import ROTMaster from './components/ROTMaster';
+import ConsignmentNoteMaster from './components/ConsignmentNoteMaster';
+import TripsMaster from './components/TripsMaster';
+import SurchargeEngine from './components/SurchargeEngine';
+
 // Icons
 import { 
   Settings, 
@@ -81,7 +93,9 @@ import {
   LogOut,
   Sliders,
   ChevronDown,
-  Building
+  Building,
+  Flame,
+  FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -103,6 +117,8 @@ export default function App() {
   // New States for Administration, Location/Zone, Rate configs
   const [locations, setLocations] = useState<LocationGeo[]>(MOCK_LOCATIONS);
   const [zones, setZones] = useState<Zone[]>(DEFAULT_ZONES);
+  const [regions, setRegions] = useState<Region[]>(INITIAL_REGIONS);
+  const [countries, setCountries] = useState<Country[]>(INITIAL_COUNTRIES);
   const [zoneTypes, setZoneTypes] = useState<ZoneType[]>(DEFAULT_ZONE_TYPES);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [currentUser, setCurrentUser] = useState<User>(INITIAL_USERS[0]);
@@ -113,6 +129,14 @@ export default function App() {
 
   // Milestone scenario configs
   const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowMilestoneConfig[]>([]);
+  const [surcharges, setSurcharges] = useState<SurchargeRule[]>([]);
+
+  // Prefilled context for converting quotation directly to booking
+  const [prefilledBookingContext, setPrefilledBookingContext] = useState<{
+    customerId: string;
+    quoteId: string;
+    rateItemId?: string;
+  } | null>(null);
 
   // Group sidebar navigation indices
   const [masterMenuOpen, setMasterMenuOpen] = useState(true);
@@ -202,6 +226,22 @@ export default function App() {
       setZones(DEFAULT_ZONES);
     }
 
+    // Load Regions
+    const localRegions = localStorage.getItem(`${keyPrefix}_regions`);
+    if (localRegions) {
+      setRegions(JSON.parse(localRegions));
+    } else {
+      setRegions(INITIAL_REGIONS);
+    }
+
+    // Load Countries
+    const localCountries = localStorage.getItem(`${keyPrefix}_countries`);
+    if (localCountries) {
+      setCountries(JSON.parse(localCountries));
+    } else {
+      setCountries(INITIAL_COUNTRIES);
+    }
+
     // Load Zone Types
     const localZt = localStorage.getItem(`${keyPrefix}_zonetypes`);
     if (localZt) {
@@ -276,6 +316,18 @@ export default function App() {
       setWorkflowConfigs(defaults);
     }
 
+    // Load Surcharges
+    const localSurcharges = localStorage.getItem(`${keyPrefix}_surcharges`);
+    if (localSurcharges) {
+      setSurcharges(JSON.parse(localSurcharges));
+    } else {
+      setSurcharges([
+        { code: 'FAF', name: 'Fuel Adjustment Factor (FAF)', amount: 45, unit: '% of Base Rate', autoTrigger: 'Always active on quotations' },
+        { code: 'HEAVY', name: 'Heavy Payload Surcharge (Overweight)', amount: 150, unit: 'Flat per Container', autoTrigger: 'Cargo weight > 22000 KG' },
+        { code: 'CONG', name: 'Port Terminal Congestion Fee', amount: 80, unit: 'Flat per Trip', autoTrigger: 'Scenario == IMP' }
+      ]);
+    }
+
   }, [activeTenant]);
 
   // Persistance helper
@@ -285,8 +337,26 @@ export default function App() {
   };
 
   // State manipulation handlers
+  const handleAddSurcharge = (rule: SurchargeRule) => {
+    const updated = [...surcharges, rule];
+    setSurcharges(updated);
+    handleSaveTenantState('surcharges', updated);
+  };
+
+  const handleDeleteSurcharge = (code: string) => {
+    const updated = surcharges.filter(s => s.code !== code);
+    setSurcharges(updated);
+    handleSaveTenantState('surcharges', updated);
+  };
+
   const handleAddCustomer = (c: Customer) => {
     const updated = [c, ...customers];
+    setCustomers(updated);
+    handleSaveTenantState('customers', updated);
+  };
+
+  const handleUpdateCustomer = (c: Customer) => {
+    const updated = customers.map(cust => cust.id === c.id ? c : cust);
     setCustomers(updated);
     handleSaveTenantState('customers', updated);
   };
@@ -334,14 +404,15 @@ export default function App() {
     handleSaveTenantState('jobs', updatedJobs);
   };
 
-  const handleAssignJobToDriver = (jobId: string, driverId: string, vehicleId: string, scheduledTime: string) => {
+  const handleAssignJobToDriver = (jobId: string, driverId: string, vehicleId: string, scheduledTime?: string) => {
     // Allocate job details
+    const finalScheduledTime = scheduledTime || '2026-05-29 10:00';
     const updatedJobs = jobs.map(j => j.id === jobId ? { 
       ...j, 
       status: 'active' as const, 
       driverId, 
       vehicleId, 
-      scheduledTime 
+      scheduledTime: finalScheduledTime
     } : j);
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
@@ -394,6 +465,54 @@ export default function App() {
     // If job complete, revert Bob's driver status to idle
     if (jobStatus === 'completed') {
       const updatedDrivers = drivers.map(d => d.id === jobObj.driverId ? { ...d, currentStatus: 'idle' as const } : d);
+      setDrivers(updatedDrivers);
+    }
+  };
+
+  // Direct dispatcher manual milestone updates from Movements control panel
+  const handleUpdateJobMilestonesDirect = (jobId: string, updatedMilestones: MilestoneStep[], currentMilestoneIndex: number) => {
+    const jobObj = jobs.find(j => j.id === jobId);
+    if (!jobObj) return;
+
+    const allCompleted = updatedMilestones.every(m => m.completed);
+    let jobStatus = jobObj.status;
+    let completionTime = jobObj.completionTime;
+
+    if (allCompleted) {
+      jobStatus = 'completed';
+      completionTime = new Date().toISOString().split('T')[0];
+    } else {
+      completionTime = undefined;
+      const someCompleted = updatedMilestones.some(m => m.completed);
+      if (someCompleted) {
+        jobStatus = 'active';
+      } else {
+        jobStatus = jobObj.driverId ? 'scheduled' as const : 'pending' as const;
+      }
+    }
+
+    const updatedJobs = jobs.map(j => j.id === jobId ? {
+      ...j,
+      milestones: updatedMilestones,
+      currentMilestoneIndex,
+      status: jobStatus,
+      completionTime
+    } : j);
+
+    setJobs(updatedJobs);
+    handleSaveTenantState('jobs', updatedJobs);
+
+    // Coordinate assigned driver container states 
+    if (jobObj.driverId) {
+      const updatedDrivers = drivers.map(d => {
+        if (d.id === jobObj.driverId) {
+          return {
+            ...d,
+            currentStatus: jobStatus === 'completed' ? 'idle' : 'in-transit'
+          } as const;
+        }
+        return d;
+      });
       setDrivers(updatedDrivers);
     }
   };
@@ -623,6 +742,7 @@ export default function App() {
                 </div>
 
                 <div className="space-y-0.5 pl-2 text-xs">
+                  {/* 1. Quotations */}
                   <button
                     id="menu-quotations"
                     onClick={() => setActiveTab('pricing')}
@@ -635,6 +755,7 @@ export default function App() {
                     <Award className="w-3.5 h-3.5 text-yellow-500" /> Quotations
                   </button>
 
+                  {/* 2. Container Booking */}
                   <button
                     id="menu-booking"
                     onClick={() => setActiveTab('booking')}
@@ -644,9 +765,36 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-green-400" /> Container Bookings
+                    <BookOpen className="w-3.5 h-3.5 text-green-400" /> Container Booking
                   </button>
 
+                  {/* 3. Release Order (ROT) */}
+                  <button
+                    id="menu-rot-master"
+                    onClick={() => setActiveTab('rot-list')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'rot-list' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" /> Release Order (ROT)
+                  </button>
+
+                  {/* 4. Consignment Notes (CN) */}
+                  <button
+                    id="menu-cn-master"
+                    onClick={() => setActiveTab('consignment-note')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'consignment-note' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Award className="w-3.5 h-3.5 text-pink-400" /> Consignment Notes (CN)
+                  </button>
+
+                  {/* 5. Gantt Scheduler */}
                   <button
                     id="menu-planning"
                     onClick={() => setActiveTab('planning')}
@@ -659,18 +807,20 @@ export default function App() {
                     <Calendar className="w-3.5 h-3.5 text-cyan-400" /> Gantt Scheduler
                   </button>
 
+                  {/* 6. Movements & Legs */}
                   <button
-                    id="menu-tracking"
-                    onClick={() => setActiveTab('tracking')}
+                    id="menu-trips-master"
+                    onClick={() => setActiveTab('trips')}
                     className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                      activeTab === 'tracking' 
+                      activeTab === 'trips' 
                         ? 'bg-blue-500/25 text-blue-400' 
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Navigation className="w-3.5 h-3.5 text-indigo-400" /> Live Maps Tracker
+                    <Navigation className="w-3.5 h-3.5 text-amber-400" /> Movements &amp; Legs
                   </button>
 
+                  {/* 7. Container Monitor */}
                   <button
                     id="menu-monitor"
                     onClick={() => setActiveTab('empty-tracker')}
@@ -681,6 +831,19 @@ export default function App() {
                     }`}
                   >
                     <Truck className="w-3.5 h-3.5 text-green-500" /> Container Monitor
+                  </button>
+
+                  {/* 8. Live Maps Tracker */}
+                  <button
+                    id="menu-tracking"
+                    onClick={() => setActiveTab('tracking')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'tracking' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Navigation className="w-3.5 h-3.5 text-indigo-400" /> Live Maps Tracker
                   </button>
                 </div>
               </div>
@@ -728,6 +891,18 @@ export default function App() {
                     }`}
                   >
                     <Receipt className="w-3.5 h-3.5 text-purple-400" /> Payments Settle
+                  </button>
+
+                  <button
+                    id="menu-surcharge-engine"
+                    onClick={() => setActiveTab('surcharge')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'surcharge' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Flame className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Surcharge Engine
                   </button>
                 </div>
               </div>
@@ -780,22 +955,23 @@ export default function App() {
               </div>
             )}
 
-            {/* Mobile App Terminal Block */}
-            {currentUser.role === 'driver_emulator' && (
-              <div className="space-y-1 border-t border-slate-800/50 pt-2">
-                <button
-                  id="menu-emulator"
-                  onClick={() => setActiveTab('emulator')}
-                  className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                     activeTab === 'emulator' 
-                      ? 'bg-blue-500/25 text-blue-400 border-l-4 border-blue-500' 
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/30'
-                  }`}
-                >
-                  <Smartphone className="w-3.5 h-3.5 text-blue-400" /> Driver Emulator App
-                </button>
+            {/* Mobile App Terminal Block - Public Demo Mode */}
+            <div className="space-y-1 border-t border-slate-800/50 pt-2 font-sans">
+              <div className="text-[9px] font-bold text-slate-505 text-slate-500 uppercase tracking-widest px-4 py-1.5">
+                PLAYGROUND TRUCKING EMULATOR
               </div>
-            )}
+              <button
+                id="menu-emulator"
+                onClick={() => setActiveTab('emulator')}
+                className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                   activeTab === 'emulator' 
+                    ? 'bg-blue-500/25 text-blue-400 border-l-4 border-blue-500' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/30'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5 text-blue-450 text-blue-400" /> Driver Emulator App
+              </button>
+            </div>
 
           </nav>
         </div>
@@ -841,14 +1017,60 @@ export default function App() {
                 customers={customers}
                 drivers={drivers}
                 vehicles={vehicles}
+                quotations={quotations}
                 onNavigate={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === 'rot-list' && (
+              <ROTMaster
+                rots={rots}
+                jobs={jobs}
+                customers={customers}
+                locations={locations}
+                onConfirmRot={handleConfirmRot}
+              />
+            )}
+
+            {activeTab === 'consignment-note' && (
+              <ConsignmentNoteMaster
+                consignmentNotes={consignmentNotes}
+                jobs={jobs}
+                customers={customers}
+                locations={locations}
+                onUpdateCns={(updated) => {
+                  setConsignmentNotes(updated);
+                  handleSaveTenantState('cns', updated);
+                }}
+              />
+            )}
+
+            {activeTab === 'trips' && (
+              <TripsMaster
+                jobs={jobs}
+                drivers={drivers}
+                vehicles={vehicles}
+                customers={customers}
+                locations={locations}
+                onAssignJob={handleAssignJobToDriver}
+                onUpdateJobMilestones={handleUpdateJobMilestonesDirect}
+              />
+            )}
+
+            {activeTab === 'surcharge' && (
+              <SurchargeEngine
+                surcharges={surcharges}
+                onAddSurcharge={handleAddSurcharge}
+                onDeleteSurcharge={handleDeleteSurcharge}
               />
             )}
 
             {activeTab === 'customers' && (
               <CustomerMaster
                 customers={customers}
+                countries={countries}
                 onAddCustomer={handleAddCustomer}
+                onUpdateCustomer={handleUpdateCustomer}
               />
             )}
 
@@ -860,6 +1082,10 @@ export default function App() {
                 onAddQuotation={handleAddQuotation}
                 onConfirmQuotation={handleConfirmQuotation}
                 onNavigate={(tab) => setActiveTab(tab)}
+                onConvertToBooking={(customerId, quoteId, rateItemId) => {
+                  setPrefilledBookingContext({ customerId, quoteId, rateItemId });
+                  setActiveTab('booking');
+                }}
               />
             )}
 
@@ -874,6 +1100,8 @@ export default function App() {
                 onAddJob={handleAddJob}
                 onConfirmRot={handleConfirmRot}
                 workflowConfigs={workflowConfigs}
+                prefilledBookingContext={prefilledBookingContext}
+                onClearPrefilledBookingContext={() => setPrefilledBookingContext(null)}
               />
             )}
 
@@ -975,6 +1203,8 @@ export default function App() {
                 locations={locations}
                 zones={zones}
                 zoneTypes={zoneTypes}
+                regions={regions}
+                countries={countries}
                 onAddLocation={(loc) => {
                   const updated = [loc, ...locations];
                   setLocations(updated);
@@ -1004,6 +1234,36 @@ export default function App() {
                   const updated = zones.filter(z => z.id !== id);
                   setZones(updated);
                   handleSaveTenantState('zones', updated);
+                }}
+                onAddRegion={(reg) => {
+                  const updated = [reg, ...regions];
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+                onUpdateRegion={(reg) => {
+                  const updated = regions.map(r => r.id === reg.id ? reg : r);
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+                onDeleteRegion={(id) => {
+                  const updated = regions.filter(r => r.id !== id);
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+                onAddCountry={(cnt) => {
+                  const updated = [cnt, ...countries];
+                  setCountries(updated);
+                  handleSaveTenantState('countries', updated);
+                }}
+                onUpdateCountry={(cnt) => {
+                  const updated = countries.map(c => c.id === cnt.id ? cnt : c);
+                  setCountries(updated);
+                  handleSaveTenantState('countries', updated);
+                }}
+                onDeleteCountry={(id) => {
+                  const updated = countries.filter(c => c.id !== id);
+                  setCountries(updated);
+                  handleSaveTenantState('countries', updated);
                 }}
               />
             )}

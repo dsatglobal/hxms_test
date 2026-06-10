@@ -3,6 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface Region {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+}
+
+export interface Country {
+  id: string;
+  name: string;
+  code: string; // ISO 2-letter code
+  regionId: string; // Foreign key referencing Region
+  currency: string;
+  taxRate: number; // Tax percentage (e.g., 9 for 9%)
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -25,6 +41,9 @@ export interface Customer {
   email: string;
   phone: string;
   activeQuotationsCount?: number;
+  countryId?: string; // Foreign key referencing Country (enforces regional scoping)
+  status?: 'draft' | 'pending_global_approval' | 'approved' | 'rejected'; // Approval workflow state
+  rejectionReason?: string; // Optional feedback when global admin rejects regional request
 }
 
 export type LocationType = 'port' | 'depot' | 'customer' | 'warehouse';
@@ -33,11 +52,13 @@ export interface LocationGeo {
   id: string;
   name: string;
   code: string;
+  unLocode: string; // The international 5-character UN/LOCODE standard representation (e.g. USLAX, SGPIN)
   type: LocationType;
   lat: number;
   lng: number;
   zone: string;
   geofenceRadius: number; // in meters
+  countryId?: string; // Links back to dynamic Country registry
 }
 
 export type VehicleType = 'skeletal' | 'flatbed' | 'sideloader' | 'tipper';
@@ -108,6 +129,18 @@ export interface Quotation {
   surcharges: SurchargeRule[];
   notes?: string;
   paymentTermsOverride?: string;
+  mqcVolume?: number;
+  mqcPeriod?: 'Monthly' | 'Quarterly' | 'Yearly' | 'Per Contract';
+  version?: number;
+  revisionNotes?: string;
+  isHazmatOnly?: boolean;
+  requiresGenset?: boolean;
+  incoterm?: 'FOB' | 'EXW' | 'DAP' | 'DDP' | 'CIF' | 'FCA' | 'FAS' | 'CFR' | 'CIP' | 'CPT';
+  freightResponsibility?: 'Shipper' | 'Consignee' | 'Third-Party';
+  demurrageFreeDays?: number;
+  detentionFreeDays?: number;
+  demurrageFlatRate?: number;
+  detentionFlatRate?: number;
 }
 
 export type JobStatus = 'pending' | 'scheduled' | 'dispatched' | 'active' | 'completed';

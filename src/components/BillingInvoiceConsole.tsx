@@ -306,6 +306,27 @@ export default function BillingInvoiceConsole({
                     </table>
                   </div>
 
+                  {/* Subcontractor cost vs sell rate split */}
+                  <div className="mt-4 bg-slate-50 border border-slate-200/60 p-3.5 rounded-lg space-y-1.5 font-sans">
+                    <div className="flex items-center gap-1.5 text-blue-600 font-bold text-[10px] uppercase tracking-wider mb-0.5">
+                      <TrendingUp className="w-3.5 h-3.5 text-blue-500" /> Haulage Fleet Margin Split
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                      <div className="bg-white p-1 rounded border border-slate-200">
+                        <span className="text-slate-400 block text-[8px] uppercase">Client Sell Rate</span>
+                        <strong className="text-slate-800 font-mono font-bold">${selectedInvoice.subTotal}.00</strong>
+                      </div>
+                      <div className="bg-white p-1 rounded border border-slate-200">
+                        <span className="text-slate-400 block text-[8px] uppercase">Subcontractor Split (70%)</span>
+                        <strong className="text-slate-800 font-mono font-bold">${Math.round(selectedInvoice.subTotal * 0.7)}.00</strong>
+                      </div>
+                      <div className="bg-white p-1 rounded border border-slate-200">
+                        <span className="text-slate-400 block text-[8px] uppercase text-green-600">Company Net Margin</span>
+                        <strong className="text-green-600 font-mono font-bold">${selectedInvoice.subTotal - Math.round(selectedInvoice.subTotal * 0.7)}.00</strong>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Balance aggregate */}
                   <div className="border-t border-slate-200 mt-4 pt-3 flex flex-col items-end text-xs space-y-1.5 leading-normal">
                     <div className="flex justify-between w-48 text-slate-500">

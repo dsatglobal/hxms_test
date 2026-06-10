@@ -3,7 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate } from './types';
+import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate, Region, Country } from './types';
+
+export const INITIAL_REGIONS: Region[] = [
+  { id: 'reg-apac', name: 'Asia-Pacific', code: 'APAC', description: 'East Asia, South Asia, Southeast Asia, and Oceania' },
+  { id: 'reg-emea', name: 'Europe, Middle East & Africa', code: 'EMEA', description: 'European Union, United Kingdom, Middle East, and African nations' },
+  { id: 'reg-amer', name: 'North America', code: 'AMER', description: 'United States, Canada, and related territories' },
+  { id: 'reg-latam', name: 'Latin America', code: 'LATAM', description: 'Central and South American jurisdictions' }
+];
+
+export const INITIAL_COUNTRIES: Country[] = [
+  { id: 'cnt-us', name: 'United States', code: 'US', regionId: 'reg-amer', currency: 'USD', taxRate: 8.0 },
+  { id: 'cnt-sg', name: 'Singapore', code: 'SG', regionId: 'reg-apac', currency: 'SGD', taxRate: 9.0 },
+  { id: 'cnt-de', name: 'Germany', code: 'DE', regionId: 'reg-emea', currency: 'EUR', taxRate: 19.0 },
+  { id: 'cnt-br', name: 'Brazil', code: 'BR', regionId: 'reg-latam', currency: 'BRL', taxRate: 12.0 },
+  { id: 'cnt-in', name: 'India', code: 'IN', regionId: 'reg-apac', currency: 'INR', taxRate: 18.0 }
+];
 
 export const MOCK_TENANTS: Tenant[] = [
   {
@@ -50,7 +65,9 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     creditLimit: 50000,
     paymentTerms: 'Net 30',
     email: 'billing@pacificfurniture.com',
-    phone: '+1 (555) 234-5678'
+    phone: '+1 (555) 234-5678',
+    countryId: 'cnt-us',
+    status: 'approved'
   },
   {
     id: 'cust-2',
@@ -60,7 +77,9 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     creditLimit: 75000,
     paymentTerms: 'Net 15',
     email: 'logistics@zenithelec.co',
-    phone: '+1 (555) 876-5432'
+    phone: '+1 (555) 876-5432',
+    countryId: 'cnt-sg',
+    status: 'approved'
   },
   {
     id: 'cust-3',
@@ -70,80 +89,132 @@ export const INITIAL_CUSTOMERS: Customer[] = [
     creditLimit: 30000,
     paymentTerms: 'Net 45',
     email: 'import-team@apexagri.com',
-    phone: '+1 (555) 345-6789'
+    phone: '+1 (555) 345-6789',
+    countryId: 'cnt-us',
+    status: 'approved'
+  },
+  {
+    id: 'cust-4',
+    name: 'Chennai Port Logistics Ltd',
+    taxId: 'GSTIN-33AAACP8',
+    address: '4, Rajaji Salai, Chennai Port, Tamil Nadu 600001',
+    creditLimit: 120000,
+    paymentTerms: 'Net 30',
+    email: 'finance@chennaiportlog.co.in',
+    phone: '+91 44 2536 1139',
+    countryId: 'cnt-in',
+    status: 'approved'
+  },
+  {
+    id: 'cust-5',
+    name: 'Hindustan Container Services',
+    taxId: 'GSTIN-27AAICH9',
+    address: 'JNPT Logistics Park, Uran, Navi Mumbai, Maharashtra 400702',
+    creditLimit: 90000,
+    paymentTerms: 'Net 15',
+    email: 'ops@hindustancontainer.in',
+    phone: '+91 22 2724 5022',
+    countryId: 'cnt-in',
+    status: 'pending_global_approval'
+  },
+  {
+    id: 'cust-6',
+    name: 'Punjab Agri Exporters Co',
+    taxId: 'GSTIN-03AAAPA1',
+    address: 'Industrial Focal Point, Phase IV, Ludhiana, Punjab 141010',
+    creditLimit: 45000,
+    paymentTerms: 'COD',
+    email: 'export@punjabagri.com',
+    phone: '+91 161 501 2490',
+    countryId: 'cnt-in',
+    status: 'draft'
   }
 ];
 
 export const MOCK_LOCATIONS: LocationGeo[] = [
   {
     id: 'loc-port-1',
-    name: 'Terminal 1, Horizon Port',
-    code: 'HZP-T1',
+    name: 'Terminal 1, Pasir Panjang Hub',
+    code: 'SGPIN-T1',
+    unLocode: 'SGPIN',
     type: 'port',
     lat: 80,
     lng: 320,
     zone: 'Zone A (Port Area)',
-    geofenceRadius: 500
+    geofenceRadius: 500,
+    countryId: 'cnt-sg'
   },
   {
     id: 'loc-port-2',
     name: 'Terminal 2, South Port Gate',
-    code: 'HZP-T2',
+    code: 'SGPIN-SG2',
+    unLocode: 'SGPIN',
     type: 'port',
     lat: 90,
     lng: 480,
     zone: 'Zone A (Port Area)',
-    geofenceRadius: 500
+    geofenceRadius: 500,
+    countryId: 'cnt-sg'
   },
   {
     id: 'loc-depot-1',
     name: 'Apex Empty Container Pool',
-    code: 'APX-DEP',
+    code: 'SGPIN-APX',
+    unLocode: 'SGPIN',
     type: 'depot',
     lat: 340,
     lng: 520,
     zone: 'Zone B (Inland East)',
-    geofenceRadius: 300
+    geofenceRadius: 300,
+    countryId: 'cnt-sg'
   },
   {
     id: 'loc-depot-2',
-    name: 'East Coast Empty Depot',
-    code: 'ECE-DEP',
+    name: 'LA Harbor Empty Depot',
+    code: 'USLAX-ECE',
+    unLocode: 'USLAX',
     type: 'depot',
     lat: 480,
     lng: 150,
     zone: 'Zone C (North Coast)',
-    geofenceRadius: 300
+    geofenceRadius: 300,
+    countryId: 'cnt-us'
   },
   {
     id: 'loc-cust-1',
     name: 'Pacific Furniture WH 1',
-    code: 'PF-WH1',
+    code: 'USLAX-PF1',
+    unLocode: 'USLAX',
     type: 'customer',
     lat: 280,
     lng: 160,
     zone: 'Zone D (West Industrial)',
-    geofenceRadius: 200
+    geofenceRadius: 200,
+    countryId: 'cnt-us'
   },
   {
     id: 'loc-cust-2',
     name: 'Zenith Electronics Main Plant',
-    code: 'ZE-PLNT',
+    code: 'DEHAM-ZNT',
+    unLocode: 'DEHAM',
     type: 'customer',
     lat: 500,
     lng: 380,
     zone: 'Zone E (East Corridor)',
-    geofenceRadius: 250
+    geofenceRadius: 250,
+    countryId: 'cnt-de'
   },
   {
     id: 'loc-cust-3',
-    name: 'Apex Agri Storage Hub',
-    code: 'AA-HUB',
+    name: 'Santos Sugar Storage Hub',
+    code: 'BRSSZ-AAH',
+    unLocode: 'BRSSZ',
     type: 'customer',
     lat: 180,
     lng: 480,
     zone: 'Zone F (Southern Basin)',
-    geofenceRadius: 400
+    geofenceRadius: 400,
+    countryId: 'cnt-br'
   }
 ];
 
@@ -233,7 +304,11 @@ export const INITIAL_QUOTATIONS: Quotation[] = [
       { code: 'FAF', name: 'Fuel Adjustment Factor (FAF)', amount: 45, unit: 'Flat % on Base Rate', autoTrigger: 'Always' },
       { code: 'PORT_FEE', name: 'Port Terminal Gate Fee', amount: 80, unit: 'Per Gate Action', autoTrigger: 'IMP / EXP actions' }
     ],
-    notes: 'Rates guaranteed for contractual volume of minimum 50 TEU monthly. Subject to terminal storage delays.'
+    notes: 'Rates guaranteed for contractual volume of minimum 50 TEU monthly. Subject to terminal storage delays.',
+    demurrageFreeDays: 7,
+    detentionFreeDays: 5,
+    demurrageFlatRate: 150,
+    detentionFlatRate: 150
   },
   {
     id: 'quote-2',
@@ -261,7 +336,11 @@ export const INITIAL_QUOTATIONS: Quotation[] = [
       { code: 'FAF', name: 'Fuel Adjustment (FAF)', amount: 45, unit: 'Flat % on Base Rate', autoTrigger: 'Always' },
       { code: 'WASH_FEE', name: 'Hazmat Steam Wash', amount: 150, unit: 'Per Wash', autoTrigger: 'On demand' }
     ],
-    notes: 'Urgent priority high-value electronics transit clauses included.'
+    notes: 'Urgent priority high-value electronics transit clauses included.',
+    demurrageFreeDays: 10,
+    detentionFreeDays: 7,
+    demurrageFlatRate: 120,
+    detentionFlatRate: 120
   },
   {
     id: 'quote-3',
@@ -286,7 +365,11 @@ export const INITIAL_QUOTATIONS: Quotation[] = [
     ],
     surcharges: [
       { code: 'FAF', name: 'Fuel Adjustment (FAF)', amount: 35, unit: 'Flat Rate', autoTrigger: 'Always' }
-    ]
+    ],
+    demurrageFreeDays: 5,
+    detentionFreeDays: 4,
+    demurrageFlatRate: 180,
+    detentionFlatRate: 180
   }
 ];
 

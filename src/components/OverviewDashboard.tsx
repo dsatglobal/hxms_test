@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { Job, Customer, Driver, Vehicle, SurchargeRule } from '../types';
+import { Job, Customer, Driver, Vehicle, SurchargeRule, Quotation } from '../types';
 import { 
   DollarSign, 
   Truck, 
@@ -25,6 +25,7 @@ interface OverviewDashboardProps {
   customers: Customer[];
   drivers: Driver[];
   vehicles: Vehicle[];
+  quotations: Quotation[];
   onNavigate: (tab: string) => void;
 }
 
@@ -33,6 +34,7 @@ export default function OverviewDashboard({
   customers,
   drivers,
   vehicles,
+  quotations,
   onNavigate
 }: OverviewDashboardProps) {
 
@@ -44,8 +46,10 @@ export default function OverviewDashboard({
     let pendingCount = 0;
     
     jobs.forEach(job => {
-      // Base revenue placeholder (based on standard rates)
-      let jobRev = job.scenario === 'IMP' ? 520 : job.scenario === 'EXP' ? 400 : 300;
+      // Look up actual quotation rates
+      const quote = quotations?.find(q => q.id === job.quotationId);
+      const rateLine = quote?.rates.find(r => r.id === job.rateItemId);
+      let jobRev = rateLine ? rateLine.baseRate : (job.scenario === 'IMP' ? 520 : job.scenario === 'EXP' ? 400 : 300);
       
       // Add extra surcharges
       job.extraSurchargesIncurred.forEach(s => {

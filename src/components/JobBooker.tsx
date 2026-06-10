@@ -19,6 +19,8 @@ interface JobBookerProps {
   onAddJob: (job: Job, rot: ROT, cn: ConsignmentNote) => void;
   onConfirmRot: (rotId: string, jobId: string) => void;
   workflowConfigs?: WorkflowMilestoneConfig[];
+  prefilledBookingContext?: { customerId: string; quoteId: string; rateItemId?: string; } | null;
+  onClearPrefilledBookingContext?: () => void;
 }
 
 export default function JobBooker({
@@ -30,7 +32,9 @@ export default function JobBooker({
   consignmentNotes,
   onAddJob,
   onConfirmRot,
-  workflowConfigs
+  workflowConfigs,
+  prefilledBookingContext,
+  onClearPrefilledBookingContext
 }: JobBookerProps) {
   const [activeTab, setActiveTab] = useState<'booking' | 'rots' | 'cns'>('booking');
 
@@ -45,6 +49,17 @@ export default function JobBooker({
   const [vesselName, setVesselName] = useState('MSC Isabella');
   const [voyageNo, setVoyageNo] = useState('V-2405W');
   const [eta, setEta] = useState('2026-05-28');
+
+  // Sync prefilled booking context from Quotation Wizard directly
+  React.useEffect(() => {
+    if (prefilledBookingContext) {
+      setSelectedCustomerId(prefilledBookingContext.customerId);
+      setSelectedQuoteId(prefilledBookingContext.quoteId);
+      if (prefilledBookingContext.rateItemId) {
+        setSelectedRateItemId(prefilledBookingContext.rateItemId);
+      }
+    }
+  }, [prefilledBookingContext]);
 
   // Filter confirmed quotations for customer
   const filteredQuotes = useMemo(() => {
@@ -125,26 +140,33 @@ export default function JobBooker({
       extraSurchargesIncurred: []
     };
 
-    // Spawn draft ROT
+    // Dynamic scenario check: Inland, RETURN, and EMTY jobs skip standard port gate Release Order Ticket (ROT) protocols
+    const isRotRequired = !(activeRateItem.scenario === 'Inland' || activeRateItem.scenario === 'RETURN' || activeRateItem.scenario === 'EMTY');
+
+    // Spawn draft ROT (Auto-confirm if NOT required)
     const newRot: ROT = {
       id: rotId,
       jobId,
       rotNo,
-      status: 'draft',
-      gateReleaseCode: `REL-G-${Math.floor(Math.random() * 90000 + 10000)}`,
+      status: isRotRequired ? 'draft' as const : 'confirmed' as const,
+      verifiedBy: isRotRequired ? undefined : 'SYSTEM (Auto-Bypass)',
+      gateReleaseCode: isRotRequired ? `REL-G-${Math.floor(Math.random() * 90000 + 10000)}` : 'N/A (Bypassed)',
       depotExpiry: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]
     };
 
-    // Spawn draft Consignment Note
+    // Spawn draft Consignment Note (Auto-issue if ROT is bypassed/confirmed)
     const newCn: ConsignmentNote = {
       id: cnId,
       jobId,
       cnNo,
-      status: 'draft',
+      status: isRotRequired ? 'draft' as const : 'issued' as const,
       printed: false
     };
 
     onAddJob(newJob, newRot, newCn);
+    
+    // Clear prefilled context from state
+    onClearPrefilledBookingContext?.();
     
     // Reset Form
     setSelectedCustomerId('');
@@ -219,6 +241,27 @@ export default function JobBooker({
           >
             <div className="lg:col-span-8 bg-white border border-slate-200 rounded-lg p-5 space-y-6 shadow-sm">
               
+              {prefilledBookingContext && (
+                <div className="bg-blue-50/75 border border-blue-250 p-3.5 rounded-lg flex items-center justify-between text-xs transition duration-200">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-1.5 bg-blue-600 rounded-md text-white flex items-center justify-center shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <p className="font-extrabold text-blue-900 font-sans">Pre-filled Commercial Quote Parameters</p>
+                      <p className="text-slate-500 text-[11px] mt-0.5">Linked quotation references and rates have been loaded automatically.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClearPrefilledBookingContext}
+                    className="text-xs text-blue-700 hover:text-blue-900 underline font-bold px-2 py-1 hover:bg-blue-50 border border-blue-200/50 rounded transition"
+                  >
+                    Reset Link
+                  </button>
+                </div>
+              )}
+
               {/* Part A: Contract validation */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 font-mono">

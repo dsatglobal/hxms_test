@@ -22,13 +22,34 @@ export default function ContainerLifecycle({
   
   // Filter active Import/Export containers currently held or active
   const monitoredContainers = useMemo(() => {
+    const CURRENT_TIME = new Date("2026-05-29T05:16:43Z");
+    const contractFreeDays = 3; // 3 days standard contractual free-time
+    const penaltyRate = 85; // $85 per day penalty rate
+
     return jobs.map((job, idx) => {
-      // Simulate random free time countdown limits based on job ID index
-      const totalFreeHours = 120; // 5 days free time
-      const indexModifier = (idx * 31) % 5; // pseudo deterministic countdown
-      const daysLeft = indexModifier + 1; // 1 to 5 days
-      const isCritical = daysLeft <= 2;
+      // Locate when container arrived at customer site
+      // Milestone 4 represents Gate-In at customer warehouse site
+      const arrivalMilestone = job.milestones[4];
+      let arrivalDate = new Date();
       
+      if (arrivalMilestone && arrivalMilestone.completed && arrivalMilestone.timestamp) {
+        arrivalDate = new Date(arrivalMilestone.timestamp);
+      } else {
+        // Fallback to scheduling index date if not completed
+        const offsetDays = (idx * 17) % 4; // pseudo-realistic offset
+        arrivalDate = new Date("2026-05-26T08:00:00Z");
+        arrivalDate.setDate(arrivalDate.getDate() + offsetDays);
+      }
+
+      // Elapsed time calculation
+      const timeDiff = CURRENT_TIME.getTime() - arrivalDate.getTime();
+      const elapsedDays = Math.max(1, Math.floor(timeDiff / (1000 * 3600 * 24)));
+
+      // Days leftover vs Overdue
+      const daysLeft = Math.max(0, contractFreeDays - elapsedDays);
+      const daysOverdue = Math.max(0, elapsedDays - contractFreeDays);
+      const isCritical = daysLeft <= 1 && daysOverdue === 0;
+
       // Calculate active penalty
       const isLadenDelivered = job.currentMilestoneIndex >= 4;
       const isUnstuffed = job.currentMilestoneIndex >= 5;
@@ -55,10 +76,11 @@ export default function ContainerLifecycle({
         scenario: job.scenario,
         shippingLine: job.shippingLine,
         customerName: customers.find(c => c.id === job.customerId)?.name || 'Unknown Account',
-        daysLeft,
+        daysLeft: daysOverdue > 0 ? 0 : daysLeft,
         isCritical,
         lifecycleState,
-        penaltyAmount: daysLeft === 1 ? 120 : 0
+        penaltyAmount: lifecycleState === 'Returned Depot' ? 0 : daysOverdue * penaltyRate,
+        daysOverdue
       };
     }).filter(c => c.scenario === 'IMP' || c.scenario === 'EXP'); // focus heavily on IMP/EXP box cycles
   }, [jobs, customers]);
@@ -168,8 +190,12 @@ export default function ContainerLifecycle({
                     <td className="px-2">
                       {isReturned ? (
                         <span className="text-slate-400 font-mono">—</span>
+                      ) : container.daysOverdue && container.daysOverdue > 0 ? (
+                        <span className="font-mono font-black text-red-650 text-red-600 block animate-pulse">
+                          OVERDUE {container.daysOverdue} {container.daysOverdue === 1 ? 'DAY' : 'DAYS'}
+                        </span>
                       ) : (
-                        <span className={`font-mono font-bold ${container.isCritical ? 'text-red-600' : 'text-slate-600'}`}>
+                        <span className={`font-mono font-bold ${container.isCritical ? 'text-red-600' : 'text-slate-500'}`}>
                           {container.daysLeft} {container.daysLeft === 1 ? 'Day Left' : 'Days Left'}
                         </span>
                       )}
