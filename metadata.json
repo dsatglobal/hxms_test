@@ -1,6 +1,6 @@
 {
   "name": "Haulage Management System",
-  "description": "Enterprise Haulage & Container Logistics Management System (HMS), featuring a live operations tower, active Gantt scheduler, customizable milestone workflows, rate card managers, payments settlements, multi-tenant RBAC profile simulator, and Postgres schema generation tools.",
+  "description": "Enterprise Haulage & Container Logistics Management System (HMS), featuring a live operations tower, active Trip Planner, customizable milestone workflows, rate card managers, payments settlements, multi-tenant RBAC profile simulator, and Postgres schema generation tools.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

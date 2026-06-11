@@ -27,7 +27,15 @@ import {
   SurchargeRule,
   MilestoneStep,
   Region,
-  Country
+  Country,
+  ShippingLine,
+  Vessel,
+  Vendor,
+  ContainerType,
+  InvoiceSettings,
+  SupportedLanguage,
+  TranslationEntry,
+  MasterTranslation
 } from './types';
 import { 
   MOCK_TENANTS, 
@@ -46,14 +54,24 @@ import {
   INITIAL_SMTP_CONFIG,
   INITIAL_EMAIL_TEMPLATES,
   BASE_TARIFFS,
+  SURCHARGE_CATALOG,
   INITIAL_REGIONS,
-  INITIAL_COUNTRIES
+  INITIAL_COUNTRIES,
+  INITIAL_SHIPPING_LINES,
+  INITIAL_VESSELS,
+  INITIAL_VENDORS,
+  INITIAL_CONTAINER_TYPES,
+  INITIAL_INVOICE_SETTINGS,
+  INITIAL_SUPPORTED_LANGUAGES,
+  INITIAL_TRANSLATIONS
 } from './data';
 
 // Components
 import OverviewDashboard from './components/OverviewDashboard';
 import QuotationWizard from './components/QuotationWizard';
 import JobBooker from './components/JobBooker';
+import DispatchConsole from './components/DispatchConsole';
+import ScheduleBuilder from './components/ScheduleBuilder';
 import GanttChart from './components/GanttChart';
 import LiveTrackingMap from './components/LiveTrackingMap';
 import DriverMilestoneApp from './components/DriverMilestoneApp';
@@ -73,6 +91,8 @@ import ROTMaster from './components/ROTMaster';
 import ConsignmentNoteMaster from './components/ConsignmentNoteMaster';
 import TripsMaster from './components/TripsMaster';
 import SurchargeEngine from './components/SurchargeEngine';
+import RegionMaster from './components/RegionMaster';
+import SupportMasters from './components/SupportMasters';
 
 // Icons
 import { 
@@ -95,9 +115,24 @@ import {
   ChevronDown,
   Building,
   Flame,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Package,
+  LayoutDashboard,
+  CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+function filterByRegion<T>(
+  data: T[], 
+  user: User,
+  activeRegionFilter: string = "ALL"
+): T[] {
+  if (user.regionAccess?.includes("ALL")) {
+    if (activeRegionFilter === "ALL") return data;
+    return data.filter((item: any) => item.regionId === activeRegionFilter);
+  }
+  return data.filter((item: any) => item.regionId === user.regionId);
+}
 
 export default function App() {
   // SaaS Multi-tenancy Subdomain State
@@ -111,6 +146,7 @@ export default function App() {
   const [rots, setRots] = useState<ROT[]>([]);
   const [consignmentNotes, setConsignmentNotes] = useState<ConsignmentNote[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings[]>(INITIAL_INVOICE_SETTINGS);
   const [drivers, setDrivers] = useState<Driver[]>(DEFAULT_DRIVERS);
   const [vehicles, setVehicles] = useState<Vehicle[]>(DEFAULT_VEHICLES);
 
@@ -130,6 +166,36 @@ export default function App() {
   // Milestone scenario configs
   const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowMilestoneConfig[]>([]);
   const [surcharges, setSurcharges] = useState<SurchargeRule[]>([]);
+  
+  // Support Masters states
+  const [shippingLines, setShippingLines] = useState<ShippingLine[]>(INITIAL_SHIPPING_LINES);
+  const [vessels, setVessels] = useState<Vessel[]>(INITIAL_VESSELS);
+  const [vendors, setVendors] = useState<Vendor[]>(INITIAL_VENDORS);
+  const [containerTypes, setContainerTypes] = useState<ContainerType[]>(INITIAL_CONTAINER_TYPES);
+  
+  // Translation management system states
+  const [supportedLanguages, setSupportedLanguages] = useState<SupportedLanguage[]>(INITIAL_SUPPORTED_LANGUAGES);
+  const [translations, setTranslations] = useState<TranslationEntry[]>(INITIAL_TRANSLATIONS);
+  const [masterTranslations, setMasterTranslations] = useState<MasterTranslation[]>([]);
+  
+  // Region filter state
+  const [activeRegionFilter, setActiveRegionFilter] = useState<string | "ALL">("ALL");
+
+  // Derived filtered variables
+  const filteredCustomers = filterByRegion<Customer>(customers, currentUser, activeRegionFilter);
+  const filteredVehicles = filterByRegion<Vehicle>(vehicles, currentUser, activeRegionFilter);
+  const filteredDrivers = filterByRegion<Driver>(drivers, currentUser, activeRegionFilter);
+  const filteredLocations = filterByRegion<LocationGeo>(locations, currentUser, activeRegionFilter);
+  const filteredZones = filterByRegion<Zone>(zones, currentUser, activeRegionFilter);
+  const filteredQuotations = filterByRegion<Quotation>(quotations, currentUser, activeRegionFilter);
+  const filteredJobs = filterByRegion<Job>(jobs, currentUser, activeRegionFilter);
+  const filteredRots = filterByRegion<ROT>(rots, currentUser, activeRegionFilter);
+  const filteredConsignmentNotes = filterByRegion<ConsignmentNote>(consignmentNotes, currentUser, activeRegionFilter);
+  const filteredInvoices = filterByRegion<Invoice>(invoices, currentUser, activeRegionFilter);
+  const filteredTariffs = filterByRegion<TariffRate>(tariffs, currentUser, activeRegionFilter);
+  const filteredSurcharges = filterByRegion<SurchargeRule>(surcharges, currentUser, activeRegionFilter);
+  const filteredShippingLines = filterByRegion<ShippingLine>(shippingLines, currentUser, activeRegionFilter);
+  const filteredVendors = filterByRegion<Vendor>(vendors, currentUser, activeRegionFilter);
 
   // Prefilled context for converting quotation directly to booking
   const [prefilledBookingContext, setPrefilledBookingContext] = useState<{
@@ -138,9 +204,32 @@ export default function App() {
     rateItemId?: string;
   } | null>(null);
 
-  // Group sidebar navigation indices
-  const [masterMenuOpen, setMasterMenuOpen] = useState(true);
-  const [opsMenuOpen, setOpsMenuOpen] = useState(true);
+  // Quote Sequence Tracker
+  const [quoteSequence, setQuoteSequence] = useState(1);
+  const handleIncrementQuoteSequence = () => {
+    setQuoteSequence((prev) => prev + 1);
+  };
+
+  // Expiry check logic
+  const checkQuotationExpiry = (quotes: Quotation[]) => {
+    const today = new Date().toISOString().split('T')[0];
+    const updated = quotes.map(q => {
+      if (q.status === 'confirmed' && q.validTo < today) {
+        return { ...q, status: 'expired' as const };
+      }
+      return q;
+    });
+
+    if (JSON.stringify(updated) !== JSON.stringify(quotes)) {
+      setQuotations(updated);
+      handleSaveTenantState('quotations', updated);
+    }
+  };
+
+  useEffect(() => {
+    checkQuotationExpiry(quotations);
+  }, [quotations]);
+
 
   // Dynamic tenant loader simulating database-per-tenant isolation
   useEffect(() => {
@@ -192,6 +281,13 @@ export default function App() {
       setInvoices(JSON.parse(localInv));
     } else {
       setInvoices([]);
+    }
+
+    const localInvSettings = localStorage.getItem(`${keyPrefix}_invoicesettings`);
+    if (localInvSettings) {
+      setInvoiceSettings(JSON.parse(localInvSettings));
+    } else {
+      setInvoiceSettings(INITIAL_INVOICE_SETTINGS);
     }
 
     // Load Drivers
@@ -321,11 +417,60 @@ export default function App() {
     if (localSurcharges) {
       setSurcharges(JSON.parse(localSurcharges));
     } else {
-      setSurcharges([
-        { code: 'FAF', name: 'Fuel Adjustment Factor (FAF)', amount: 45, unit: '% of Base Rate', autoTrigger: 'Always active on quotations' },
-        { code: 'HEAVY', name: 'Heavy Payload Surcharge (Overweight)', amount: 150, unit: 'Flat per Container', autoTrigger: 'Cargo weight > 22000 KG' },
-        { code: 'CONG', name: 'Port Terminal Congestion Fee', amount: 80, unit: 'Flat per Trip', autoTrigger: 'Scenario == IMP' }
-      ]);
+      setSurcharges(SURCHARGE_CATALOG);
+    }
+
+    // Load Support Masters
+    const localShippingLines = localStorage.getItem(`${keyPrefix}_shippinglines`);
+    if (localShippingLines) {
+      setShippingLines(JSON.parse(localShippingLines));
+    } else {
+      setShippingLines(INITIAL_SHIPPING_LINES);
+    }
+
+    const localVessels = localStorage.getItem(`${keyPrefix}_vessels`);
+    if (localVessels) {
+      setVessels(JSON.parse(localVessels));
+    } else {
+      setVessels(INITIAL_VESSELS);
+    }
+
+    const localVendors = localStorage.getItem(`${keyPrefix}_vendors`);
+    if (localVendors) {
+      setVendors(JSON.parse(localVendors));
+    } else {
+      setVendors(INITIAL_VENDORS);
+    }
+
+    const localContainerTypes = localStorage.getItem(`${keyPrefix}_containertypes`);
+    if (localContainerTypes) {
+      setContainerTypes(JSON.parse(localContainerTypes));
+    } else {
+      setContainerTypes(INITIAL_CONTAINER_TYPES);
+    }
+
+    // Load supported languages
+    const localLangs = localStorage.getItem(`${keyPrefix}_supported_languages`);
+    if (localLangs) {
+      setSupportedLanguages(JSON.parse(localLangs));
+    } else {
+      setSupportedLanguages(INITIAL_SUPPORTED_LANGUAGES);
+    }
+
+    // Load translations
+    const localTranslations = localStorage.getItem(`${keyPrefix}_translations`);
+    if (localTranslations) {
+      setTranslations(JSON.parse(localTranslations));
+    } else {
+      setTranslations(INITIAL_TRANSLATIONS);
+    }
+
+    // Load master record translations
+    const localMasterTranslations = localStorage.getItem(`${keyPrefix}_master_translations`);
+    if (localMasterTranslations) {
+      setMasterTranslations(JSON.parse(localMasterTranslations));
+    } else {
+      setMasterTranslations([]);
     }
 
   }, [activeTenant]);
@@ -343,14 +488,133 @@ export default function App() {
     handleSaveTenantState('surcharges', updated);
   };
 
+  const handleUpdateSurcharge = (rule: SurchargeRule) => {
+    const updated = surcharges.map(s => 
+      s.code === rule.code ? rule : s
+    );
+    setSurcharges(updated);
+    handleSaveTenantState('surcharges', updated);
+  };
+
   const handleDeleteSurcharge = (code: string) => {
     const updated = surcharges.filter(s => s.code !== code);
     setSurcharges(updated);
     handleSaveTenantState('surcharges', updated);
   };
 
+  // Translation Management System Handlers
+  const handleUpdateLanguage = (lang: SupportedLanguage) => {
+    const exists = supportedLanguages.some(l => l.id === lang.id || l.code === lang.code);
+    let updated;
+    if (exists) {
+      updated = supportedLanguages.map(l => (l.id === lang.id || l.code === lang.code) ? lang : l);
+    } else {
+      updated = [...supportedLanguages, lang];
+    }
+    setSupportedLanguages(updated);
+    handleSaveTenantState('supported_languages', updated);
+  };
+
+  const handleAddTranslation = (entry: TranslationEntry) => {
+    const updated = [...translations, entry];
+    setTranslations(updated);
+    handleSaveTenantState('translations', updated);
+  };
+
+  const handleUpdateTranslation = (entry: TranslationEntry) => {
+    const updated = translations.map(t => t.id === entry.id ? entry : t);
+    setTranslations(updated);
+    handleSaveTenantState('translations', updated);
+  };
+
+  const handleAddMasterTranslation = (entry: MasterTranslation) => {
+    const updated = [...masterTranslations, entry];
+    setMasterTranslations(updated);
+    handleSaveTenantState('master_translations', updated);
+  };
+
+  const handleUpdateMasterTranslation = (entry: MasterTranslation) => {
+    const updated = masterTranslations.map(t => t.id === entry.id ? entry : t);
+    setMasterTranslations(updated);
+    handleSaveTenantState('master_translations', updated);
+  };
+
+  // Support Masters Handlers
+  const handleAddShippingLine = (line: ShippingLine) => {
+    const updated = [...shippingLines, line];
+    setShippingLines(updated);
+    handleSaveTenantState('shippinglines', updated);
+  };
+
+  const handleUpdateShippingLine = (line: ShippingLine) => {
+    const updated = shippingLines.map(l => l.id === line.id ? line : l);
+    setShippingLines(updated);
+    handleSaveTenantState('shippinglines', updated);
+  };
+
+  const handleDeleteShippingLine = (id: string) => {
+    const updated = shippingLines.filter(l => l.id !== id);
+    setShippingLines(updated);
+    handleSaveTenantState('shippinglines', updated);
+  };
+
+  const handleAddVessel = (vess: Vessel) => {
+    const updated = [...vessels, vess];
+    setVessels(updated);
+    handleSaveTenantState('vessels', updated);
+  };
+
+  const handleUpdateVessel = (vess: Vessel) => {
+    const updated = vessels.map(v => v.id === vess.id ? vess : v);
+    setVessels(updated);
+    handleSaveTenantState('vessels', updated);
+  };
+
+  const handleDeleteVessel = (id: string) => {
+    const updated = vessels.filter(v => v.id !== id);
+    setVessels(updated);
+    handleSaveTenantState('vessels', updated);
+  };
+
+  const handleAddVendor = (vend: Vendor) => {
+    const updated = [...vendors, vend];
+    setVendors(updated);
+    handleSaveTenantState('vendors', updated);
+  };
+
+  const handleUpdateVendor = (vend: Vendor) => {
+    const updated = vendors.map(v => v.id === vend.id ? vend : v);
+    setVendors(updated);
+    handleSaveTenantState('vendors', updated);
+  };
+
+  const handleDeleteVendor = (id: string) => {
+    const updated = vendors.filter(v => v.id !== id);
+    setVendors(updated);
+    handleSaveTenantState('vendors', updated);
+  };
+
+  const handleAddContainerType = (ct: ContainerType) => {
+    const updated = [...containerTypes, ct];
+    setContainerTypes(updated);
+    handleSaveTenantState('containertypes', updated);
+  };
+
+  const handleUpdateContainerType = (ct: ContainerType) => {
+    const updated = containerTypes.map(c => c.id === ct.id ? ct : c);
+    setContainerTypes(updated);
+    handleSaveTenantState('containertypes', updated);
+  };
+
+  const handleDeleteContainerType = (id: string) => {
+    const updated = containerTypes.filter(c => c.id !== id);
+    setContainerTypes(updated);
+    handleSaveTenantState('containertypes', updated);
+  };
+
   const handleAddCustomer = (c: Customer) => {
-    const updated = [c, ...customers];
+    const enriched = { ...c, regionId: currentUser.regionId || 'IN' };
+    const updated = [enriched, ...customers];
     setCustomers(updated);
     handleSaveTenantState('customers', updated);
   };
@@ -361,8 +625,27 @@ export default function App() {
     handleSaveTenantState('customers', updated);
   };
 
+  const handleAddRegion = (reg: Region) => {
+    const updated = [reg, ...regions];
+    setRegions(updated);
+    handleSaveTenantState('regions', updated);
+  };
+
+  const handleUpdateRegion = (reg: Region) => {
+    const updated = regions.map(r => r.id === reg.id ? reg : r);
+    setRegions(updated);
+    handleSaveTenantState('regions', updated);
+  };
+
+  const handleDeleteRegion = (id: string) => {
+    const updated = regions.filter(r => r.id !== id);
+    setRegions(updated);
+    handleSaveTenantState('regions', updated);
+  };
+
   const handleAddQuotation = (q: Quotation) => {
-    const updated = [q, ...quotations];
+    const enriched = { ...q, regionId: currentUser.regionId || 'IN' };
+    const updated = [enriched, ...quotations];
     setQuotations(updated);
     handleSaveTenantState('quotations', updated);
   };
@@ -374,17 +657,36 @@ export default function App() {
   };
 
   const handleAddJob = (job: Job, rot: ROT, cn: ConsignmentNote) => {
-    const updatedJobs = [job, ...jobs];
+    const userRegId = currentUser.regionId || 'IN';
+
+    const detentionRule = surcharges.find(
+      s => s.code === "DET" && 
+      (s.applicableShippingLines.length === 0 || 
+       s.applicableShippingLines.includes(job.shippingLine))
+    );
+    const freeTimeDays = detentionRule?.freePeriod ?? 7;
+
+    const enrichedJob = { ...job, regionId: userRegId, freeTimeDays };
+    const enrichedRot = { ...rot, regionId: userRegId };
+    const enrichedCn = { ...cn, regionId: userRegId };
+
+    const updatedJobs = [enrichedJob, ...jobs];
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
 
-    const updatedRots = [rot, ...rots];
+    const updatedRots = [enrichedRot, ...rots];
     setRots(updatedRots);
     handleSaveTenantState('rots', updatedRots);
 
-    const updatedCns = [cn, ...consignmentNotes];
+    const updatedCns = [enrichedCn, ...consignmentNotes];
     setConsignmentNotes(updatedCns);
     handleSaveTenantState('cns', updatedCns);
+  };
+
+  const handleUpdateJob = (updatedJob: Job) => {
+    const updatedJobs = jobs.map(j => (j.id === updatedJob.id ? updatedJob : j));
+    setJobs(updatedJobs);
+    handleSaveTenantState('jobs', updatedJobs);
   };
 
   const handleConfirmRot = (rotId: string, jobId: string) => {
@@ -412,7 +714,8 @@ export default function App() {
       status: 'active' as const, 
       driverId, 
       vehicleId, 
-      scheduledTime: finalScheduledTime
+      scheduledTime: finalScheduledTime,
+      regionId: currentUser.regionId || 'IN'
     } : j);
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
@@ -439,6 +742,27 @@ export default function App() {
       signatureName
     };
 
+    // Detention update
+    const currentMilestone = milestones[currentIndex];
+    let gateOutTimestamp = jobObj.gateOutTimestamp;
+    let gateInTimestamp = jobObj.gateInTimestamp;
+    let freeTimeExpiry = jobObj.freeTimeExpiry;
+
+    if (currentMilestone.label.includes("Loaded") || currentMilestone.label.includes("Stuffed")) {
+       gateOutTimestamp = new Date().toISOString();
+       if (jobObj.freeTimeDays) {
+         const expiry = new Date();
+         expiry.setDate(expiry.getDate() + jobObj.freeTimeDays);
+         freeTimeExpiry = expiry.toISOString();
+       }
+    }
+    
+    if (currentMilestone.label.includes("Gate In") || currentMilestone.label.includes("Returned") || currentMilestone.label.includes("Depot")) {
+       if (!jobObj.gateInTimestamp) {
+         gateInTimestamp = new Date().toISOString();
+       }
+    }
+
     const nextIndex = currentIndex + 1;
     let jobStatus = jobObj.status;
     let completionTime = jobObj.completionTime;
@@ -454,6 +778,9 @@ export default function App() {
     const updatedJobs = jobs.map(j => j.id === jobId ? {
       ...j,
       milestones,
+      gateOutTimestamp,
+      gateInTimestamp,
+      freeTimeExpiry,
       currentMilestoneIndex: nextIndex < milestones.length ? nextIndex : currentIndex,
       status: jobStatus,
       completionTime
@@ -562,8 +889,44 @@ export default function App() {
     handleSaveTenantState('jobs', updatedJobs);
   };
 
+  const handleLogException = (
+    jobId: string,
+    exceptionType: string,
+    notes: string,
+    evidenceFlag: boolean
+  ) => {
+    const updatedJobs = jobs.map(j => {
+      if (j.id !== jobId) return j;
+      return {
+        ...j,
+        status: "exception" as const,
+        exceptionLog: [
+          ...(j.exceptionLog ?? []),
+          {
+            type: exceptionType,
+            notes,
+            evidenceFlag,
+            reportedAt: new Date().toISOString(),
+            reportedByDriverId: j.driverId ?? ""
+          }
+        ]
+      };
+    });
+    setJobs(updatedJobs);
+    handleSaveTenantState('jobs', updatedJobs);
+  };
+
+  const handleUpdateInvoiceSettings = (settings: InvoiceSettings) => {
+    const updated = invoiceSettings.map(s => 
+      s.regionId === settings.regionId ? settings : s
+    );
+    setInvoiceSettings(updated);
+    handleSaveTenantState('invoicesettings', updated);
+  };
+
   const handleAddInvoice = (inv: Invoice) => {
-    const updatedInvoiced = [inv, ...invoices];
+    const enriched = { ...inv, regionId: inv.regionId || currentUser.regionId || 'IN' };
+    const updatedInvoiced = [enriched, ...invoices];
     setInvoices(updatedInvoiced);
     handleSaveTenantState('invoices', updatedInvoiced);
 
@@ -571,9 +934,23 @@ export default function App() {
     const updatedJobs = jobs.map(j => j.id === inv.jobId ? { ...j, billingStatus: 'invoiced' as const } : j);
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
+
+    // Sequence incrementing logic:
+    const regionSettings = invoiceSettings.find(
+      s => s.regionId === enriched.regionId
+    );
+    if (regionSettings) {
+      handleUpdateInvoiceSettings({
+        ...regionSettings,
+        currentSequence: regionSettings.currentSequence + 1
+      });
+    }
   };
 
-  const handleUpdateInvoiceStatus = (invoiceId: string, status: 'paid' | 'unpaid') => {
+  const handleUpdateInvoiceStatus = (
+    invoiceId: string, 
+    status: "draft" | "approved" | "sent" | "paid" | "unpaid" | "overdue" | "cancelled"
+  ) => {
     const updated = invoices.map(i => i.id === invoiceId ? { ...i, status } : i);
     setInvoices(updated);
     handleSaveTenantState('invoices', updated);
@@ -587,6 +964,7 @@ export default function App() {
     // Simulate empty return job instantly triggered
     const newJob: Job = {
       id: `job-${Date.now()}`,
+      regionId: currentUser.regionId || 'IN',
       jobNo: `JB-2026-${Math.round(Math.random() * 9000 + 1000)}`,
       tenantId: 'tenant-1',
       customerId: sourceJob.customerId,
@@ -613,7 +991,7 @@ export default function App() {
     const updatedJobs = [newJob, ...jobs];
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
-    alert('EMPTY CONTAINER RETURN SCHEDULED! Outstanding chassis now listed on Gantt scheduler.');
+    alert('EMPTY CONTAINER RETURN SCHEDULED! Outstanding chassis now listed on Trip Planner.');
     setActiveTab('planning');
   };
 
@@ -630,20 +1008,58 @@ export default function App() {
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-400 hidden md:inline">TENANT REGION GATEWAY:</span>
-          <select
-            value={activeTenant.id}
-            onChange={(e) => {
-              const matched = MOCK_TENANTS.find(t => t.id === e.target.value);
-              if (matched) setActiveTenant(matched);
-            }}
-            className="bg-slate-950 border border-slate-800 rounded px-2.5 py-0.5 text-[11px] font-bold text-blue-400 focus:outline-none cursor-pointer"
-          >
-            {MOCK_TENANTS.map(t => (
-              <option key={t.id} value={t.id}>{t.name} (DB Isolated)</option>
-            ))}
-          </select>
+        <div className="flex items-center gap-4">
+          {/* Region Context indicator/switcher */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-400 hidden sm:inline">REGION:</span>
+            {currentUser.regionAccess?.includes("ALL") ? (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={activeRegionFilter}
+                  onChange={(e) => setActiveRegionFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-[11px] font-bold text-slate-200 focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Regions</option>
+                  {regions.filter(r => r.isActive).map(r => (
+                    <option key={r.code} value={r.code}>{r.code} — {r.name}</option>
+                  ))}
+                </select>
+                {activeRegionFilter === "ALL" ? (
+                  <span className="bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded text-[10px] font-bold shrink-0">
+                    ALL REGIONS
+                  </span>
+                ) : (
+                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold shrink-0">
+                    {activeRegionFilter}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded text-[10px] font-bold select-none whitespace-nowrap">
+                {regions.find(r => r.code === currentUser.regionId) 
+                  ? `${regions.find(r => r.code === currentUser.regionId)?.code} — ${regions.find(r => r.code === currentUser.regionId)?.name}`
+                  : (currentUser.regionId || "N/A")}
+              </span>
+            )}
+          </div>
+
+          <div className="h-4 w-[1px] bg-slate-800 hidden md:block" />
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-400 hidden md:inline">TENANT REGION GATEWAY:</span>
+            <select
+              value={activeTenant.id}
+              onChange={(e) => {
+                const matched = MOCK_TENANTS.find(t => t.id === e.target.value);
+                if (matched) setActiveTenant(matched);
+              }}
+              className="bg-slate-950 border border-slate-800 rounded px-2.5 py-0.5 text-[11px] font-bold text-blue-400 focus:outline-none cursor-pointer"
+            >
+              {MOCK_TENANTS.map(t => (
+                <option key={t.id} value={t.id}>{t.name} (DB Isolated)</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -668,7 +1084,7 @@ export default function App() {
           {/* Navigation Links inside nested groups */}
           <nav className="space-y-3 overflow-y-auto max-h-[calc(105vh-350px)] pr-1 scrollbar-thin">
             
-            {/* Core Overview */}
+            {/* GROUP 1 — (no label, top level) */}
             <div className="space-y-1">
               <button
                 id="menu-dashboard"
@@ -680,15 +1096,15 @@ export default function App() {
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  <Sliders className="w-3.5 h-3.5" /> Dashboard Tower
+                  <Sliders className="w-3.5 h-3.5" /> Dashboard
                 </span>
               </button>
             </div>
 
-            {/* Masters Menu group */}
+            {/* GROUP 2 — MASTERS */}
             <div className="space-y-1">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1">
-                SYSTEM MASTERS
+                MASTERS
               </div>
               
               <div className="space-y-0.5 pl-2 text-xs">
@@ -731,18 +1147,29 @@ export default function App() {
                     </button>
                   </>
                 )}
+
+                <button
+                  id="menu-support-masters"
+                  onClick={() => setActiveTab('support-masters')}
+                  className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                    activeTab === 'support-masters' 
+                      ? 'bg-blue-500/25 text-blue-400' 
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5 text-indigo-400" /> Support Masters
+                </button>
               </div>
             </div>
 
-            {/* Operations Menu Group */}
+            {/* GROUP 3 — OPERATIONS */}
             {currentUser.role !== 'billing' && (
               <div className="space-y-1">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1">
-                  OPERATIONS &amp; RUN
+                  OPERATIONS
                 </div>
 
                 <div className="space-y-0.5 pl-2 text-xs">
-                  {/* 1. Quotations */}
                   <button
                     id="menu-quotations"
                     onClick={() => setActiveTab('pricing')}
@@ -755,7 +1182,6 @@ export default function App() {
                     <Award className="w-3.5 h-3.5 text-yellow-500" /> Quotations
                   </button>
 
-                  {/* 2. Container Booking */}
                   <button
                     id="menu-booking"
                     onClick={() => setActiveTab('booking')}
@@ -765,10 +1191,9 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-green-400" /> Container Booking
+                    <BookOpen className="w-3.5 h-3.5 text-green-400" /> Booking
                   </button>
 
-                  {/* 3. Release Order (ROT) */}
                   <button
                     id="menu-rot-master"
                     onClick={() => setActiveTab('rot-list')}
@@ -781,7 +1206,6 @@ export default function App() {
                     <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" /> Release Order (ROT)
                   </button>
 
-                  {/* 4. Consignment Notes (CN) */}
                   <button
                     id="menu-cn-master"
                     onClick={() => setActiveTab('consignment-note')}
@@ -791,23 +1215,9 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Award className="w-3.5 h-3.5 text-pink-400" /> Consignment Notes (CN)
+                    <Award className="w-3.5 h-3.5 text-pink-400" /> Consignment Notes
                   </button>
 
-                  {/* 5. Gantt Scheduler */}
-                  <button
-                    id="menu-planning"
-                    onClick={() => setActiveTab('planning')}
-                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                      activeTab === 'planning' 
-                        ? 'bg-blue-500/25 text-blue-400' 
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Calendar className="w-3.5 h-3.5 text-cyan-400" /> Gantt Scheduler
-                  </button>
-
-                  {/* 6. Movements & Legs */}
                   <button
                     id="menu-trips-master"
                     onClick={() => setActiveTab('trips')}
@@ -817,10 +1227,35 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Navigation className="w-3.5 h-3.5 text-amber-400" /> Movements &amp; Legs
+                    <Navigation className="w-3.5 h-3.5 text-amber-400" /> Trips
                   </button>
 
-                  {/* 7. Container Monitor */}
+                  {/* NEW NAV ITEMS */}
+                  <button
+                    id="menu-dispatch-console"
+                    onClick={() => setActiveTab('dispatch-console')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'dispatch-console' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5 text-blue-400" /> Dispatch Console
+                  </button>
+
+                  <button
+                    id="menu-schedule-builder"
+                    onClick={() => setActiveTab('schedule-builder')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'schedule-builder' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <CalendarDays className="w-3.5 h-3.5 text-cyan-400" /> Schedule Builder
+                  </button>
+
+
                   <button
                     id="menu-monitor"
                     onClick={() => setActiveTab('empty-tracker')}
@@ -832,28 +1267,15 @@ export default function App() {
                   >
                     <Truck className="w-3.5 h-3.5 text-green-500" /> Container Monitor
                   </button>
-
-                  {/* 8. Live Maps Tracker */}
-                  <button
-                    id="menu-tracking"
-                    onClick={() => setActiveTab('tracking')}
-                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                      activeTab === 'tracking' 
-                        ? 'bg-blue-500/25 text-blue-400' 
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Navigation className="w-3.5 h-3.5 text-indigo-400" /> Live Maps Tracker
-                  </button>
                 </div>
               </div>
             )}
 
-            {/* Accounting Group */}
+            {/* GROUP 4 — ACCOUNTING */}
             {currentUser.role !== 'dispatcher' && (
               <div className="space-y-1">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1">
-                  FINANCE LEDGER
+                  ACCOUNTING
                 </div>
 
                 <div className="space-y-0.5 pl-2 text-xs">
@@ -870,6 +1292,18 @@ export default function App() {
                   </button>
 
                   <button
+                    id="menu-surcharge-engine"
+                    onClick={() => setActiveTab('surcharge')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'surcharge' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Flame className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Surcharge Engine
+                  </button>
+
+                  <button
                     id="menu-billing"
                     onClick={() => setActiveTab('billing')}
                     className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
@@ -878,7 +1312,7 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Receipt className="w-3.5 h-3.5 text-amber-500" /> Invoices Issuer
+                    <Receipt className="w-3.5 h-3.5 text-amber-500" /> Invoicing
                   </button>
 
                   <button
@@ -890,29 +1324,17 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Receipt className="w-3.5 h-3.5 text-purple-400" /> Payments Settle
-                  </button>
-
-                  <button
-                    id="menu-surcharge-engine"
-                    onClick={() => setActiveTab('surcharge')}
-                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                      activeTab === 'surcharge' 
-                        ? 'bg-blue-500/25 text-blue-400' 
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Flame className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Surcharge Engine
+                    <Receipt className="w-3.5 h-3.5 text-purple-400" /> Payments
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Administration & Configuration Group */}
-            {currentUser.role === 'administrator' && (
+            {/* GROUP 5 — ADMINISTRATION */}
+            {(currentUser.role === 'administrator' || currentUser.role === 'region_admin') && (
               <div className="space-y-1">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 py-1">
-                  SYSTEM OVERRIDES
+                  ADMINISTRATION
                 </div>
 
                 <div className="space-y-0.5 pl-2 text-xs">
@@ -926,6 +1348,18 @@ export default function App() {
                     }`}
                   >
                     <MapPin className="w-3.5 h-3.5 text-red-400" /> Locations &amp; Zones
+                  </button>
+
+                  <button
+                    id="menu-region-master"
+                    onClick={() => setActiveTab('region-master')}
+                    className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                      activeTab === 'region-master' 
+                        ? 'bg-blue-500/25 text-blue-400' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-400" /> Region Master
                   </button>
 
                   <button
@@ -949,17 +1383,14 @@ export default function App() {
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                     }`}
                   >
-                    <Settings className="w-3.5 h-3.5 text-slate-400 animate-spin-slow" /> Global Settings Admin
+                    <Settings className="w-3.5 h-3.5 text-slate-400 animate-spin-slow" /> Administration
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Mobile App Terminal Block - Public Demo Mode */}
+            {/* GROUP 6 — (no label, bottom) */}
             <div className="space-y-1 border-t border-slate-800/50 pt-2 font-sans">
-              <div className="text-[9px] font-bold text-slate-505 text-slate-500 uppercase tracking-widest px-4 py-1.5">
-                PLAYGROUND TRUCKING EMULATOR
-              </div>
               <button
                 id="menu-emulator"
                 onClick={() => setActiveTab('emulator')}
@@ -969,7 +1400,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/30'
                 }`}
               >
-                <Smartphone className="w-3.5 h-3.5 text-blue-450 text-blue-400" /> Driver Emulator App
+                <Smartphone className="w-3.5 h-3.5 text-blue-450 text-blue-400" /> Driver App (Demo)
               </button>
             </div>
 
@@ -993,7 +1424,7 @@ export default function App() {
               }
             }}
             className="text-slate-400 hover:text-white transition shrink-0 p-1 bg-slate-800 hover:bg-slate-700 rounded"
-            title="Reset to Master Administrator Terminal"
+            title="Switch User"
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
@@ -1013,31 +1444,42 @@ export default function App() {
           >
             {activeTab === 'dashboard' && (
               <OverviewDashboard
-                jobs={jobs}
-                customers={customers}
-                drivers={drivers}
-                vehicles={vehicles}
-                quotations={quotations}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
+                quotations={filteredQuotations}
+                invoices={filteredInvoices}
+                surcharges={filteredSurcharges}
+                regions={regions}
+                activeRegionFilter={activeRegionFilter}
+                isCorpAdmin={currentUser.regionAccess?.includes("ALL")}
+                activeTenant={activeTenant}
                 onNavigate={(tab) => setActiveTab(tab)}
               />
             )}
 
             {activeTab === 'rot-list' && (
               <ROTMaster
-                rots={rots}
-                jobs={jobs}
-                customers={customers}
-                locations={locations}
+                rots={filteredRots}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                locations={filteredLocations}
                 onConfirmRot={handleConfirmRot}
               />
             )}
 
             {activeTab === 'consignment-note' && (
               <ConsignmentNoteMaster
-                consignmentNotes={consignmentNotes}
-                jobs={jobs}
-                customers={customers}
-                locations={locations}
+                consignmentNotes={filteredConsignmentNotes}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                locations={filteredLocations}
+                translations={translations}
+                supportedLanguages={supportedLanguages}
+                regions={regions}
+                drivers={drivers}
+                vehicles={vehicles}
                 onUpdateCns={(updated) => {
                   setConsignmentNotes(updated);
                   handleSaveTenantState('cns', updated);
@@ -1047,11 +1489,11 @@ export default function App() {
 
             {activeTab === 'trips' && (
               <TripsMaster
-                jobs={jobs}
-                drivers={drivers}
-                vehicles={vehicles}
-                customers={customers}
-                locations={locations}
+                jobs={filteredJobs}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
+                customers={filteredCustomers}
+                locations={filteredLocations}
                 onAssignJob={handleAssignJobToDriver}
                 onUpdateJobMilestones={handleUpdateJobMilestonesDirect}
               />
@@ -1059,15 +1501,22 @@ export default function App() {
 
             {activeTab === 'surcharge' && (
               <SurchargeEngine
-                surcharges={surcharges}
+                surcharges={filteredSurcharges}
+                regions={regions}
+                shippingLines={shippingLines}
                 onAddSurcharge={handleAddSurcharge}
+                onUpdateSurcharge={handleUpdateSurcharge}
                 onDeleteSurcharge={handleDeleteSurcharge}
+                supportedLanguages={supportedLanguages}
+                masterTranslations={masterTranslations}
+                onAddMasterTranslation={handleAddMasterTranslation}
+                onUpdateMasterTranslation={handleUpdateMasterTranslation}
               />
             )}
 
             {activeTab === 'customers' && (
               <CustomerMaster
-                customers={customers}
+                customers={filteredCustomers}
                 countries={countries}
                 onAddCustomer={handleAddCustomer}
                 onUpdateCustomer={handleUpdateCustomer}
@@ -1076,9 +1525,11 @@ export default function App() {
 
             {activeTab === 'pricing' && (
               <QuotationWizard
-                quotations={quotations}
-                customers={customers}
-                locations={locations}
+                quotations={filteredQuotations}
+                customers={filteredCustomers}
+                locations={filteredLocations}
+                shippingLines={shippingLines}
+                containerTypes={containerTypes}
                 onAddQuotation={handleAddQuotation}
                 onConfirmQuotation={handleConfirmQuotation}
                 onNavigate={(tab) => setActiveTab(tab)}
@@ -1086,17 +1537,21 @@ export default function App() {
                   setPrefilledBookingContext({ customerId, quoteId, rateItemId });
                   setActiveTab('booking');
                 }}
+                quoteSequence={quoteSequence}
+                onIncrementQuoteSequence={handleIncrementQuoteSequence}
               />
             )}
 
             {activeTab === 'booking' && (
               <JobBooker
-                jobs={jobs}
-                customers={customers}
-                quotations={quotations}
-                locations={locations}
-                rots={rots}
-                consignmentNotes={consignmentNotes}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                quotations={filteredQuotations}
+                locations={filteredLocations}
+                rots={filteredRots}
+                consignmentNotes={filteredConsignmentNotes}
+                shippingLines={shippingLines}
+                containerTypes={containerTypes}
                 onAddJob={handleAddJob}
                 onConfirmRot={handleConfirmRot}
                 workflowConfigs={workflowConfigs}
@@ -1105,51 +1560,72 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'planning' && (
-              <GanttChart
-                jobs={jobs}
-                drivers={drivers}
-                vehicles={vehicles}
-                customers={customers}
+            {activeTab === 'dispatch-console' && (
+              <DispatchConsole
+                jobs={filteredJobs}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
+                customers={filteredCustomers}
+                locations={filteredLocations}
+                quotations={filteredQuotations}
+                regions={regions}
+                currentUser={currentUser}
                 onAssignJob={handleAssignJobToDriver}
+                onTriggerDynamicInsertion={handleTriggerDynamicInsertion}
+                onLogException={handleLogException}
+                onUpdateJob={(updatedJob) => {
+                  const updated = jobs.map(j =>
+                    j.id === updatedJob.id ? updatedJob : j
+                  );
+                  setJobs(updated);
+                  handleSaveTenantState('jobs', updated);
+                }}
+                onNavigate={(tab) => setActiveTab(tab)}
               />
             )}
 
-            {activeTab === 'tracking' && (
-              <LiveTrackingMap
-                jobs={jobs}
-                drivers={drivers}
-                vehicles={vehicles}
-                locations={locations}
-                onTriggerDynamicInsertion={handleTriggerDynamicInsertion}
+            {activeTab === 'schedule-builder' && (
+              <ScheduleBuilder
+                jobs={filteredJobs}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
+                customers={filteredCustomers}
+                locations={filteredLocations}
+                onAssignJob={handleAssignJobToDriver}
               />
             )}
 
             {activeTab === 'empty-tracker' && (
               <ContainerLifecycle
-                jobs={jobs}
-                customers={customers}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
                 onTriggerReturnJob={handleTriggerReturnJob}
+                onUpdateJob={handleUpdateJob}
               />
             )}
 
             {activeTab === 'billing' && (
               <BillingInvoiceConsole
-                jobs={jobs}
-                customers={customers}
-                quotations={quotations}
-                invoices={invoices}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                quotations={filteredQuotations}
+                invoices={filteredInvoices}
                 activeTenant={activeTenant}
+                invoiceSettings={invoiceSettings}
+                surcharges={surcharges}
+                regions={regions}
+                currentUser={currentUser}
                 onAddInvoice={handleAddInvoice}
                 onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
+                onUpdateInvoiceSettings={handleUpdateInvoiceSettings}
               />
             )}
 
             {activeTab === 'emulator' && (
               <DriverMilestoneApp
-                jobs={jobs}
-                drivers={drivers}
-                vehicles={vehicles}
+                jobs={filteredJobs}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
                 onUpdateMilestone={handleUpdateMilestone}
               />
             )}
@@ -1157,9 +1633,10 @@ export default function App() {
             {/* New Systems Administrations Panels */}
             {activeTab === 'fleet-master' && (
               <FleetMaster
-                vehicles={vehicles}
+                vehicles={filteredVehicles}
                 onAddVehicle={(v) => {
-                  const updated = [v, ...vehicles];
+                  const enriched = { ...v, regionId: currentUser.regionId || 'IN' };
+                  const updated = [enriched, ...vehicles];
                   setVehicles(updated);
                   handleSaveTenantState('vehicles', updated);
                 }}
@@ -1178,10 +1655,11 @@ export default function App() {
 
             {activeTab === 'driver-master' && (
               <DriverMaster
-                drivers={drivers}
-                vehicles={vehicles}
+                drivers={filteredDrivers}
+                vehicles={filteredVehicles}
                 onAddDriver={(d) => {
-                  const updated = [d, ...drivers];
+                  const enriched = { ...d, regionId: currentUser.regionId || 'IN' };
+                  const updated = [enriched, ...drivers];
                   setDrivers(updated);
                   handleSaveTenantState('drivers', updated);
                 }}
@@ -1200,13 +1678,14 @@ export default function App() {
 
             {activeTab === 'locations-zones' && (
               <LocationZoneMaster
-                locations={locations}
-                zones={zones}
+                locations={filteredLocations}
+                zones={filteredZones}
                 zoneTypes={zoneTypes}
                 regions={regions}
                 countries={countries}
                 onAddLocation={(loc) => {
-                  const updated = [loc, ...locations];
+                  const enriched = { ...loc, regionId: currentUser.regionId || 'IN' };
+                  const updated = [enriched, ...locations];
                   setLocations(updated);
                   handleSaveTenantState('locations', updated);
                 }}
@@ -1221,7 +1700,8 @@ export default function App() {
                   handleSaveTenantState('locations', updated);
                 }}
                 onAddZone={(z) => {
-                  const updated = [z, ...zones];
+                  const enriched = { ...z, regionId: currentUser.regionId || 'IN' };
+                  const updated = [enriched, ...zones];
                   setZones(updated);
                   handleSaveTenantState('zones', updated);
                 }}
@@ -1265,15 +1745,67 @@ export default function App() {
                   setCountries(updated);
                   handleSaveTenantState('countries', updated);
                 }}
+                supportedLanguages={supportedLanguages}
+                masterTranslations={masterTranslations}
+                onAddMasterTranslation={handleAddMasterTranslation}
+                onUpdateMasterTranslation={handleUpdateMasterTranslation}
+              />
+            )}
+
+            {activeTab === 'region-master' && (
+              <RegionMaster
+                regions={regions}
+                onAddRegion={(reg) => {
+                  const updated = [reg, ...regions];
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+                onUpdateRegion={(reg) => {
+                  const updated = regions.map(r => r.id === reg.id ? reg : r);
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+                onDeleteRegion={(id) => {
+                  const updated = regions.filter(r => r.id !== id);
+                  setRegions(updated);
+                  handleSaveTenantState('regions', updated);
+                }}
+              />
+            )}
+
+            {activeTab === 'support-masters' && (
+              <SupportMasters
+                shippingLines={shippingLines}
+                vessels={vessels}
+                vendors={vendors}
+                containerTypes={containerTypes}
+                regions={regions}
+                onAddShippingLine={handleAddShippingLine}
+                onUpdateShippingLine={handleUpdateShippingLine}
+                onDeleteShippingLine={handleDeleteShippingLine}
+                onAddVessel={handleAddVessel}
+                onUpdateVessel={handleUpdateVessel}
+                onDeleteVessel={handleDeleteVessel}
+                onAddVendor={handleAddVendor}
+                onUpdateVendor={handleUpdateVendor}
+                onDeleteVendor={handleDeleteVendor}
+                onAddContainerType={handleAddContainerType}
+                onUpdateContainerType={handleUpdateContainerType}
+                onDeleteContainerType={handleDeleteContainerType}
+                supportedLanguages={supportedLanguages}
+                masterTranslations={masterTranslations}
+                onAddMasterTranslation={handleAddMasterTranslation}
+                onUpdateMasterTranslation={handleUpdateMasterTranslation}
               />
             )}
 
             {activeTab === 'rate-cards' && (
               <RateCardManager
-                tariffs={tariffs}
-                zones={zones}
+                tariffs={filteredTariffs}
+                zones={filteredZones}
                 onAddTariff={(t) => {
-                  const updated = [t, ...tariffs];
+                  const enriched = { ...t, regionId: currentUser.regionId || 'IN' };
+                  const updated = [enriched, ...tariffs];
                   setTariffs(updated);
                   handleSaveTenantState('tariffs', updated);
                 }}
@@ -1304,12 +1836,16 @@ export default function App() {
                   setWorkflowConfigs(updated);
                   handleSaveTenantState('workflowconfigs', updated);
                 }}
+                supportedLanguages={supportedLanguages}
+                masterTranslations={masterTranslations}
+                onAddMasterTranslation={handleAddMasterTranslation}
+                onUpdateMasterTranslation={handleUpdateMasterTranslation}
               />
             )}
 
             {activeTab === 'payments' && (
               <PaymentsConsole
-                invoices={invoices}
+                invoices={filteredInvoices}
                 payments={payments}
                 onAddPayment={(p) => {
                   const updated = [p, ...payments];
@@ -1332,6 +1868,7 @@ export default function App() {
                 }}
                 users={users}
                 currentUser={currentUser}
+                regions={regions}
                 onAddUser={(usr) => {
                   const updated = [...users, usr];
                   setUsers(updated);
@@ -1361,6 +1898,11 @@ export default function App() {
                   setEmailTemplates(updated);
                   handleSaveTenantState('emailtemplates', updated);
                 }}
+                translations={translations}
+                supportedLanguages={supportedLanguages}
+                onUpdateLanguage={handleUpdateLanguage}
+                onAddTranslation={handleAddTranslation}
+                onUpdateTranslation={handleUpdateTranslation}
               />
             )}
 

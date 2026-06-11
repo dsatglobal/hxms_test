@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Customer, Quotation, LocationGeo, Job, ROT, ConsignmentNote, ScenarioType, ContainerSizeCode, MilestoneStep, WorkflowMilestoneConfig } from '../types';
+import { Customer, Quotation, LocationGeo, Job, ROT, ConsignmentNote, ScenarioType, ContainerSizeCode, MilestoneStep, WorkflowMilestoneConfig, ShippingLine, ContainerType } from '../types';
 import { Layers, FilePlus, ShieldAlert, CheckCircle2, FileText, ChevronRight, Lock, Printer, Award } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createMilestonesForScenario } from '../data';
@@ -16,6 +16,8 @@ interface JobBookerProps {
   locations: LocationGeo[];
   rots: ROT[];
   consignmentNotes: ConsignmentNote[];
+  shippingLines: ShippingLine[];
+  containerTypes: ContainerType[];
   onAddJob: (job: Job, rot: ROT, cn: ConsignmentNote) => void;
   onConfirmRot: (rotId: string, jobId: string) => void;
   workflowConfigs?: WorkflowMilestoneConfig[];
@@ -30,6 +32,8 @@ export default function JobBooker({
   locations,
   rots,
   consignmentNotes,
+  shippingLines,
+  containerTypes,
   onAddJob,
   onConfirmRot,
   workflowConfigs,
@@ -45,7 +49,7 @@ export default function JobBooker({
   const [containerNo, setContainerNo] = useState('');
   const [sealNo, setSealNo] = useState('');
   const [weightKg, setWeightKg] = useState(22000);
-  const [shippingLine, setShippingLine] = useState('MSC Mediterranean');
+  const [shippingLine, setShippingLine] = useState('');
   const [vesselName, setVesselName] = useState('MSC Isabella');
   const [voyageNo, setVoyageNo] = useState('V-2405W');
   const [eta, setEta] = useState('2026-05-28');
@@ -366,12 +370,16 @@ export default function JobBooker({
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500">Shipping Ocean Line</label>
-                    <input
-                      type="text"
-                      className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500 transition-colors"
+                    <select
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 transition-colors"
                       value={shippingLine}
                       onChange={(e) => setShippingLine(e.target.value)}
-                    />
+                    >
+                      <option value="">Select Shipping Line...</option>
+                      {shippingLines.filter(sl => sl.isActive).map(sl => (
+                        <option key={sl.id} value={sl.name}>{sl.name} ({sl.scacCode})</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500">Vessel Brand Name</label>

@@ -3,13 +3,85 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate, Region, Country } from './types';
+import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate, Region, Country, ShippingLine, Vessel, Vendor, ContainerType, InvoiceSettings, SupportedLanguage, TranslationEntry } from './types';
 
 export const INITIAL_REGIONS: Region[] = [
-  { id: 'reg-apac', name: 'Asia-Pacific', code: 'APAC', description: 'East Asia, South Asia, Southeast Asia, and Oceania' },
-  { id: 'reg-emea', name: 'Europe, Middle East & Africa', code: 'EMEA', description: 'European Union, United Kingdom, Middle East, and African nations' },
-  { id: 'reg-amer', name: 'North America', code: 'AMER', description: 'United States, Canada, and related territories' },
-  { id: 'reg-latam', name: 'Latin America', code: 'LATAM', description: 'Central and South American jurisdictions' }
+  { 
+    id: 'reg-india', 
+    name: 'India Operations', 
+    code: 'IN', 
+    description: 'Chennai, Mumbai, and New Delhi national haulage ops',
+    country: 'India',
+    currency: 'INR',
+    currencySymbol: '₹',
+    timezone: 'Asia/Kolkata',
+    dateFormat: 'DD/MM/YYYY',
+    taxLabel: 'GST',
+    taxRate: 18,
+    primaryLanguage: 'English',
+    secondaryLanguage: 'Tamil',
+    govtRefFields: ['E-way Bill No', 'BOE No', 'GSTIN No'],
+    freeTimeDays: 7,
+    isActive: true,
+    createdAt: '2026-01-15T08:00:00Z'
+  },
+  { 
+    id: 'reg-uae', 
+    name: 'UAE Operations', 
+    code: 'UAE', 
+    description: 'Jebel Ali and Dubai Port free trade logistics zones',
+    country: 'United Arab Emirates',
+    currency: 'AED',
+    currencySymbol: 'AED',
+    timezone: 'Asia/Dubai',
+    dateFormat: 'DD/MM/YYYY',
+    taxLabel: 'VAT',
+    taxRate: 5,
+    primaryLanguage: 'English',
+    secondaryLanguage: 'Arabic',
+    govtRefFields: ['Customs Dec No', 'Gate Pass Ref'],
+    freeTimeDays: 5,
+    isActive: true,
+    createdAt: '2026-02-10T10:30:00Z'
+  },
+  { 
+    id: 'reg-uk', 
+    name: 'United Kingdom Ops', 
+    code: 'UK', 
+    description: 'Felixstowe and Southampton UK/EU channel trucking',
+    country: 'United Kingdom',
+    currency: 'GBP',
+    currencySymbol: '£',
+    timezone: 'Europe/London',
+    dateFormat: 'DD-MM-YYYY',
+    taxLabel: 'VAT',
+    taxRate: 20,
+    primaryLanguage: 'English',
+    secondaryLanguage: 'French',
+    govtRefFields: ['MRN Reference', 'EORI Number'],
+    freeTimeDays: 4,
+    isActive: true,
+    createdAt: '2026-03-01T09:15:00Z'
+  },
+  { 
+    id: 'reg-malaysia', 
+    name: 'Malaysia Operations', 
+    code: 'MY', 
+    description: 'Port Klang and Penang regional feeder operations',
+    country: 'Malaysia',
+    currency: 'MYR',
+    currencySymbol: 'RM',
+    timezone: 'Asia/Kuala_Lumpur',
+    dateFormat: 'DD/MM/YYYY',
+    taxLabel: 'SST',
+    taxRate: 6,
+    primaryLanguage: 'English',
+    secondaryLanguage: 'Malay',
+    govtRefFields: ['K1 Custom Form', 'EDI Gate Pass'],
+    freeTimeDays: 6,
+    isActive: false,
+    createdAt: '2026-04-12T14:20:00Z'
+  }
 ];
 
 export const INITIAL_COUNTRIES: Country[] = [
@@ -30,7 +102,8 @@ export const MOCK_TENANTS: Tenant[] = [
     accentColor: '#f97316',
     currency: 'USD',
     weightUnit: 'KG',
-    baseTariffsEnabled: true
+    baseTariffsEnabled: true,
+    reportingCurrency: "USD"
   },
   {
     id: 'tenant-2',
@@ -41,7 +114,8 @@ export const MOCK_TENANTS: Tenant[] = [
     accentColor: '#0ea5e9',
     currency: 'SGD',
     weightUnit: 'KG',
-    baseTariffsEnabled: true
+    baseTariffsEnabled: true,
+    reportingCurrency: "USD"
   },
   {
     id: 'tenant-3',
@@ -52,13 +126,15 @@ export const MOCK_TENANTS: Tenant[] = [
     accentColor: '#a855f7',
     currency: 'EUR',
     weightUnit: 'LBS',
-    baseTariffsEnabled: false
+    baseTariffsEnabled: false,
+    reportingCurrency: "USD"
   }
 ];
 
 export const INITIAL_CUSTOMERS: Customer[] = [
   {
     id: 'cust-1',
+    regionId: 'IN',
     name: 'Pacific Furniture Co.',
     taxId: 'TX-992182-A',
     address: '25 East industrial Boulevard, Zone 4',
@@ -71,6 +147,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-2',
+    regionId: 'IN',
     name: 'Zenith Electronics Ltd.',
     taxId: 'TX-105541-E',
     address: 'High Tech Park, West Section, Bldg 8',
@@ -83,6 +160,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-3',
+    regionId: 'IN',
     name: 'Apex Agricultural Silos',
     taxId: 'TX-440239-X',
     address: 'Grain Docks Road, Wharf Sector B',
@@ -95,6 +173,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-4',
+    regionId: 'IN',
     name: 'Chennai Port Logistics Ltd',
     taxId: 'GSTIN-33AAACP8',
     address: '4, Rajaji Salai, Chennai Port, Tamil Nadu 600001',
@@ -107,6 +186,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-5',
+    regionId: 'IN',
     name: 'Hindustan Container Services',
     taxId: 'GSTIN-27AAICH9',
     address: 'JNPT Logistics Park, Uran, Navi Mumbai, Maharashtra 400702',
@@ -119,6 +199,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-6',
+    regionId: 'IN',
     name: 'Punjab Agri Exporters Co',
     taxId: 'GSTIN-03AAAPA1',
     address: 'Industrial Focal Point, Phase IV, Ludhiana, Punjab 141010',
@@ -134,6 +215,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 export const MOCK_LOCATIONS: LocationGeo[] = [
   {
     id: 'loc-port-1',
+    regionId: 'IN',
     name: 'Terminal 1, Pasir Panjang Hub',
     code: 'SGPIN-T1',
     unLocode: 'SGPIN',
@@ -146,6 +228,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-port-2',
+    regionId: 'IN',
     name: 'Terminal 2, South Port Gate',
     code: 'SGPIN-SG2',
     unLocode: 'SGPIN',
@@ -158,6 +241,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-depot-1',
+    regionId: 'IN',
     name: 'Apex Empty Container Pool',
     code: 'SGPIN-APX',
     unLocode: 'SGPIN',
@@ -170,6 +254,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-depot-2',
+    regionId: 'IN',
     name: 'LA Harbor Empty Depot',
     code: 'USLAX-ECE',
     unLocode: 'USLAX',
@@ -182,6 +267,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-cust-1',
+    regionId: 'IN',
     name: 'Pacific Furniture WH 1',
     code: 'USLAX-PF1',
     unLocode: 'USLAX',
@@ -194,6 +280,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-cust-2',
+    regionId: 'IN',
     name: 'Zenith Electronics Main Plant',
     code: 'DEHAM-ZNT',
     unLocode: 'DEHAM',
@@ -206,6 +293,7 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
   },
   {
     id: 'loc-cust-3',
+    regionId: 'IN',
     name: 'Santos Sugar Storage Hub',
     code: 'BRSSZ-AAH',
     unLocode: 'BRSSZ',
@@ -219,157 +307,264 @@ export const MOCK_LOCATIONS: LocationGeo[] = [
 ];
 
 export const DEFAULT_VEHICLES: Vehicle[] = [
-  { id: 'veh-1', plateNumber: 'PM-8821-X', type: 'skeletal', ownerType: 'in-house', roadTaxExpiry: '2026-11-20', maintenanceAlert: false },
-  { id: 'veh-2', plateNumber: 'PM-5044-Y', type: 'flatbed', ownerType: 'in-house', roadTaxExpiry: '2026-08-14', maintenanceAlert: false },
-  { id: 'veh-3', plateNumber: 'PM-1033-A', type: 'sideloader', ownerType: 'subcontract', roadTaxExpiry: '2027-02-10', maintenanceAlert: true },
-  { id: 'veh-4', plateNumber: 'PM-4541-W', type: 'tipper', ownerType: 'in-house', roadTaxExpiry: '2026-10-05', maintenanceAlert: false },
-  { id: 'veh-5', plateNumber: 'PM-3312-Z', type: 'skeletal', ownerType: 'subcontract', roadTaxExpiry: '2026-12-01', maintenanceAlert: false }
+  { id: 'veh-1', regionId: 'IN', plateNumber: 'PM-8821-X', type: 'skeletal', ownerType: 'in-house', roadTaxExpiry: '2026-11-20', maintenanceAlert: false },
+  { id: 'veh-2', regionId: 'IN', plateNumber: 'PM-5044-Y', type: 'flatbed', ownerType: 'in-house', roadTaxExpiry: '2026-08-14', maintenanceAlert: false },
+  { id: 'veh-3', regionId: 'IN', plateNumber: 'PM-1033-A', type: 'sideloader', ownerType: 'subcontract', roadTaxExpiry: '2027-02-10', maintenanceAlert: true },
+  { id: 'veh-4', regionId: 'IN', plateNumber: 'PM-4541-W', type: 'tipper', ownerType: 'in-house', roadTaxExpiry: '2026-10-05', maintenanceAlert: false },
+  { id: 'veh-5', regionId: 'IN', plateNumber: 'PM-3312-Z', type: 'skeletal', ownerType: 'subcontract', roadTaxExpiry: '2026-12-01', maintenanceAlert: false }
 ];
 
 export const DEFAULT_DRIVERS: Driver[] = [
-  { id: 'drv-1', name: 'Bob Johnson', licenseNumber: 'DL-992019A', licenseExpiry: '2028-04-12', portPassNumber: 'PP-882-X', phone: '+1 (555) 123-0101', assignedVehicleId: 'veh-1', currentStatus: 'idle' },
-  { id: 'drv-2', name: 'Alice Smith', licenseNumber: 'DL-441029B', licenseExpiry: '2027-09-30', portPassNumber: 'PP-102-Y', phone: '+1 (555) 123-0202', assignedVehicleId: 'veh-2', currentStatus: 'idle' },
-  { id: 'drv-3', name: 'Charles Lee', licenseNumber: 'DL-301142C', licenseExpiry: '2030-01-15', portPassNumber: 'PP-334-A', phone: '+1 (555) 123-0303', assignedVehicleId: 'veh-3', currentStatus: 'idle' },
-  { id: 'drv-4', name: 'David Miller', licenseNumber: 'DL-770421D', licenseExpiry: '2026-06-18', portPassNumber: 'PP-454-W', phone: '+1 (555) 123-0404', assignedVehicleId: 'veh-4', currentStatus: 'idle' },
-  { id: 'drv-5', name: 'Eliza Watson', licenseNumber: 'DL-229988E', licenseExpiry: '2029-11-25', portPassNumber: 'PP-901-Z', phone: '+1 (555) 123-0505', assignedVehicleId: 'veh-5', currentStatus: 'idle' }
+  { id: 'drv-1', regionId: 'IN', name: 'Bob Johnson', licenseNumber: 'DL-992019A', licenseExpiry: '2028-04-12', portPassNumber: 'PP-882-X', phone: '+1 (555) 123-0101', assignedVehicleId: 'veh-1', currentStatus: 'idle' },
+  { id: 'drv-2', regionId: 'IN', name: 'Alice Smith', licenseNumber: 'DL-441029B', licenseExpiry: '2027-09-30', portPassNumber: 'PP-102-Y', phone: '+1 (555) 123-0202', assignedVehicleId: 'veh-2', currentStatus: 'idle' },
+  { id: 'drv-3', regionId: 'IN', name: 'Charles Lee', licenseNumber: 'DL-301142C', licenseExpiry: '2030-01-15', portPassNumber: 'PP-334-A', phone: '+1 (555) 123-0303', assignedVehicleId: 'veh-3', currentStatus: 'idle' },
+  { id: 'drv-4', regionId: 'IN', name: 'David Miller', licenseNumber: 'DL-770421D', licenseExpiry: '2026-06-18', portPassNumber: 'PP-454-W', phone: '+1 (555) 123-0404', assignedVehicleId: 'veh-4', currentStatus: 'idle' },
+  { id: 'drv-5', regionId: 'IN', name: 'Eliza Watson', licenseNumber: 'DL-229988E', licenseExpiry: '2029-11-25', portPassNumber: 'PP-901-Z', phone: '+1 (555) 123-0505', assignedVehicleId: 'veh-5', currentStatus: 'idle' }
 ];
 
 export const SURCHARGE_CATALOG: SurchargeRule[] = [
-  { code: 'FAF', name: 'Fuel Adjustment Factor (FAF)', amount: 45, unit: 'Flat % on Base Rate', autoTrigger: 'Always applicable' },
-  { code: 'PORT_FEE', name: 'Port Terminal Lift-on Lift-off Gate Charge', amount: 80, unit: 'Per Gate Event', autoTrigger: 'IMP / EXP actions' },
-  { code: 'DET_WARN', name: 'Container Late-Return Detention Penalty', amount: 120, unit: 'Per Day Exceeded', autoTrigger: 'Exceeding Free Time' },
-  { code: 'CHAS_HOLD', name: 'Extended Chassis Idle Parking Surcharge', amount: 95, unit: 'Per Night Holdover', autoTrigger: 'Night overstay' },
-  { code: 'WASH_FEE', name: 'Hazmat / Chemical Container Steam Wash', amount: 150, unit: 'Per Clean Event', autoTrigger: 'Chemical / Agri shipments' }
+  {
+    id: 'surch-faf',
+    code: 'FAF',
+    name: 'Fuel Adjustment Factor',
+    category: 'Fuel',
+    calculationMethod: 'Percentage of Base',
+    amount: 12,
+    currency: 'INR',
+    freePeriod: 0,
+    freePeriodUnit: 'None',
+    maxChargeCap: null,
+    applicableScenarios: ['IMP', 'EXP', 'Inland', 'EMTY', 'RETURN'],
+    applicableShippingLines: [],
+    autoTrigger: true,
+    autoTriggerCondition: 'Always applied on all quotations',
+    billToCustomer: true,
+    payToSubcontractor: false,
+    subcontractorAmount: 0,
+    regionId: 'IN',
+    isActive: true,
+    createdAt: '2026-06-10T00:00:00Z'
+  },
+  {
+    id: 'surch-det',
+    code: 'DET',
+    name: 'Detention Charge',
+    category: 'Detention',
+    calculationMethod: 'Per Day',
+    amount: 5000,
+    currency: 'INR',
+    freePeriod: 7,
+    freePeriodUnit: 'Days',
+    maxChargeCap: null,
+    applicableScenarios: ['IMP', 'EXP'],
+    applicableShippingLines: [],
+    autoTrigger: true,
+    autoTriggerCondition: 'Triggered when container not returned within free time days',
+    billToCustomer: true,
+    payToSubcontractor: false,
+    subcontractorAmount: 0,
+    regionId: 'IN',
+    isActive: true,
+    createdAt: '2026-06-10T00:00:00Z'
+  },
+  {
+    id: 'surch-wait',
+    code: 'WAIT',
+    name: 'Waiting Time',
+    category: 'Waiting Time',
+    calculationMethod: 'Per Hour',
+    amount: 1000,
+    currency: 'INR',
+    freePeriod: 2,
+    freePeriodUnit: 'Hours',
+    maxChargeCap: 8000,
+    applicableScenarios: ['IMP', 'EXP', 'Inland'],
+    applicableShippingLines: [],
+    autoTrigger: false,
+    autoTriggerCondition: 'Manually triggered by dispatcher after driver reports delay',
+    billToCustomer: true,
+    payToSubcontractor: true,
+    subcontractorAmount: 600,
+    regionId: 'IN',
+    isActive: true,
+    createdAt: '2026-06-10T00:00:00Z'
+  },
+  {
+    id: 'surch-cong',
+    code: 'CONG',
+    name: 'Port Congestion Fee',
+    category: 'Port Fee',
+    calculationMethod: 'Flat',
+    amount: 2500,
+    currency: 'INR',
+    freePeriod: 0,
+    freePeriodUnit: 'None',
+    maxChargeCap: null,
+    applicableScenarios: ['IMP', 'EXP'],
+    applicableShippingLines: [],
+    autoTrigger: false,
+    autoTriggerCondition: 'Applied when port gate queue exceeds 4 hours',
+    billToCustomer: true,
+    payToSubcontractor: false,
+    subcontractorAmount: 0,
+    regionId: 'IN',
+    isActive: true,
+    createdAt: '2026-06-10T00:00:00Z'
+  },
+  {
+    id: 'surch-chassis',
+    code: 'CHASSIS',
+    name: 'Chassis Holding Fee',
+    category: 'Chassis',
+    calculationMethod: 'Per Day',
+    amount: 1500,
+    currency: 'INR',
+    freePeriod: 1,
+    freePeriodUnit: 'Days',
+    maxChargeCap: null,
+    applicableScenarios: ['IMP', 'EXP', 'Inland'],
+    applicableShippingLines: [],
+    autoTrigger: false,
+    autoTriggerCondition: 'Applied when chassis held at customer site beyond free day',
+    billToCustomer: true,
+    payToSubcontractor: false,
+    subcontractorAmount: 0,
+    regionId: 'IN',
+    isActive: true,
+    createdAt: '2026-06-10T00:00:00Z'
+  }
 ];
 
 export const BASE_TARIFFS: TariffRate[] = [
   // HZP-T1 (Port) to WH 1 (Zone D)
-  { id: 'tf-1', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '20GP', amount: 350 },
-  { id: 'tf-2', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '40GP', amount: 480 },
-  { id: 'tf-3', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '40HC', amount: 520 },
+  { id: 'tf-1', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '20GP', amount: 350 },
+  { id: 'tf-2', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '40GP', amount: 480 },
+  { id: 'tf-3', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone D (West Industrial)', size: '40HC', amount: 520 },
   
   // HZP-T1 (Port) to Zenith Plant (Zone E)
-  { id: 'tf-4', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '20GP', amount: 420 },
-  { id: 'tf-5', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '40GP', amount: 590 },
-  { id: 'tf-6', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 650 },
+  { id: 'tf-4', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '20GP', amount: 420 },
+  { id: 'tf-5', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '40GP', amount: 590 },
+  { id: 'tf-6', regionId: 'IN', scenario: 'IMP', fromZone: 'Zone A (Port Area)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 650 },
 
   // Apex Empty Central (Zone B) to Wharf/Custs
-  { id: 'tf-7', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '20GP', amount: 280 },
-  { id: 'tf-8', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '40GP', amount: 400 },
-  { id: 'tf-9', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 440 },
+  { id: 'tf-7', regionId: 'IN', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '20GP', amount: 280 },
+  { id: 'tf-8', regionId: 'IN', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '40GP', amount: 400 },
+  { id: 'tf-9', regionId: 'IN', scenario: 'EXP', fromZone: 'Zone B (Inland East)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 440 },
 
   // Inland point-to-point (Zone D to Zone E)
-  { id: 'tf-10', scenario: 'Inland', fromZone: 'Zone D (West Industrial)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 600 },
+  { id: 'tf-10', regionId: 'IN', scenario: 'Inland', fromZone: 'Zone D (West Industrial)', toZone: 'Zone E (East Corridor)', size: '40HC', amount: 600 },
   // EMTY Repositioning
-  { id: 'tf-11', scenario: 'EMTY', fromZone: 'Zone B (Inland East)', toZone: 'Zone C (North Coast)', size: '40GP', amount: 180 },
+  { id: 'tf-11', regionId: 'IN', scenario: 'EMTY', fromZone: 'Zone B (Inland East)', toZone: 'Zone C (North Coast)', size: '40GP', amount: 180 },
   // Return to ocean carrier (Zone D to Depot 1)
-  { id: 'tf-12', scenario: 'RETURN', fromZone: 'Zone D (West Industrial)', toZone: 'Zone B (Inland East)', size: '40HC', amount: 220 }
+  { id: 'tf-12', regionId: 'IN', scenario: 'RETURN', fromZone: 'Zone D (West Industrial)', toZone: 'Zone B (Inland East)', size: '40HC', amount: 220 }
 ];
 
 export const INITIAL_QUOTATIONS: Quotation[] = [
   {
     id: 'quote-1',
-    quoteNo: 'QT-2026-0001',
-    tenantId: 'tenant-1',
-    customerId: 'cust-1', // Pacific Furniture
-    status: 'confirmed',
-    effectiveDate: '2026-01-01',
-    expiryDate: '2026-12-31',
-    rates: [
+    quoteNo: "QT-IN-2026-0001",
+    regionId: "IN",
+    customerId: "cust-1",
+    scenario: "IMP",
+    status: "confirmed",
+    validFrom: "2026-05-12", // 30 days ago approx (ignoring exact date relative to today 2026-06-11)
+    validTo: "2026-08-11", // 60 days from now
+    rateItems: [
       {
-        id: 'qr-1',
-        scenario: 'IMP',
-        fromLocationId: 'loc-port-1',
-        toLocationId: 'loc-cust-1',
-        containerSize: '40HC',
-        baseRate: 520,
-        additionalSurcharges: [
-          { code: 'FAF', amount: 45 },
-          { code: 'PORT_FEE', amount: 80 }
-        ]
-      },
-      {
-        id: 'qr-2',
-        scenario: 'RETURN',
-        fromLocationId: 'loc-cust-1',
-        toLocationId: 'loc-depot-1',
-        containerSize: '40HC',
-        baseRate: 220,
-        additionalSurcharges: [
-          { code: 'FAF', amount: 15 }
-        ]
+        id: 'ri-1',
+        containerType: "40HC",
+        containerTypeId: "ct-40hc",
+        originZoneId: "zone-a",
+        destinationZoneId: "zone-d",
+        baseRate: 45000,
+        currency: "INR",
+        returnLegRate: 8000,
+        estimatedFuelSurcharge: 5400, // 12% of 45000
+        applicableSurcharges: [
+          { surchargeCode: "FAF", surchargeName: "Fuel Adjustment Factor", amount: 12, calculationMethod: "Percentage of Base", isIncluded: false },
+          { surchargeCode: "DET", surchargeName: "Detention Charge", amount: 5000, calculationMethod: "Per Day", isIncluded: false },
+          { surchargeCode: "WAIT", surchargeName: "Waiting Time", amount: 1000, calculationMethod: "Per Hour", isIncluded: false },
+        ],
+        totalEstimatedValue: 50400, // base + faf (Wait/Det are conditional/extra)
+        rotRequired: true,
+        notes: "Standard 40HC IMP rate"
       }
     ],
-    surcharges: [
-      { code: 'FAF', name: 'Fuel Adjustment Factor (FAF)', amount: 45, unit: 'Flat % on Base Rate', autoTrigger: 'Always' },
-      { code: 'PORT_FEE', name: 'Port Terminal Gate Fee', amount: 80, unit: 'Per Gate Action', autoTrigger: 'IMP / EXP actions' }
-    ],
-    notes: 'Rates guaranteed for contractual volume of minimum 50 TEU monthly. Subject to terminal storage delays.',
-    demurrageFreeDays: 7,
-    detentionFreeDays: 5,
-    demurrageFlatRate: 150,
-    detentionFlatRate: 150
+    totalValue: 50400,
+    currency: "INR",
+    internalNotes: "Confirmed contract",
+    customerNotes: "Samsung India Import",
+    createdBy: "user-admin",
+    createdAt: "2026-05-12T00:00:00Z",
+    updatedAt: "2026-05-12T00:00:00Z"
   },
   {
     id: 'quote-2',
-    quoteNo: 'QT-2026-0002',
-    tenantId: 'tenant-1',
-    customerId: 'cust-2', // Zenith Electronics
-    status: 'confirmed',
-    effectiveDate: '2026-02-15',
-    expiryDate: '2026-12-31',
-    rates: [
+    quoteNo: "QT-IN-2026-0002",
+    regionId: "IN",
+    customerId: "cust-2",
+    scenario: "EXP",
+    status: "confirmed",
+    validFrom: "2026-05-12",
+    validTo: "2026-08-11",
+    rateItems: [
       {
-        id: 'qr-3',
-        scenario: 'EXP',
-        fromLocationId: 'loc-depot-1',
-        toLocationId: 'loc-cust-2',
-        containerSize: '40GP',
-        baseRate: 400,
-        additionalSurcharges: [
-          { code: 'FAF', amount: 45 },
-          { code: 'PORT_FEE', amount: 80 }
-        ]
+        id: 'ri-2',
+        containerType: "40GP",
+        containerTypeId: "ct-40gp",
+        originZoneId: "zone-b",
+        destinationZoneId: "zone-a",
+        baseRate: 38000,
+        currency: "INR",
+        returnLegRate: 0,
+        estimatedFuelSurcharge: 4560, // 12%
+        applicableSurcharges: [],
+        totalEstimatedValue: 42560,
+        rotRequired: true,
+        notes: "Export rate"
       }
     ],
-    surcharges: [
-      { code: 'FAF', name: 'Fuel Adjustment (FAF)', amount: 45, unit: 'Flat % on Base Rate', autoTrigger: 'Always' },
-      { code: 'WASH_FEE', name: 'Hazmat Steam Wash', amount: 150, unit: 'Per Wash', autoTrigger: 'On demand' }
-    ],
-    notes: 'Urgent priority high-value electronics transit clauses included.',
-    demurrageFreeDays: 10,
-    detentionFreeDays: 7,
-    demurrageFlatRate: 120,
-    detentionFlatRate: 120
+    totalValue: 42560,
+    currency: "INR",
+    internalNotes: "",
+    customerNotes: "Atlas Exports",
+    createdBy: "user-admin",
+    createdAt: "2026-05-12T00:00:00Z",
+    updatedAt: "2026-05-12T00:00:00Z"
   },
   {
     id: 'quote-3',
-    quoteNo: 'QT-2026-0003',
-    tenantId: 'tenant-1',
-    customerId: 'cust-3', // Apex Agri
-    status: 'draft',
-    effectiveDate: '2026-05-10',
-    expiryDate: '2026-08-31',
-    rates: [
+    quoteNo: "QT-IN-2026-0003",
+    regionId: "IN",
+    customerId: "cust-3",
+    scenario: "Inland",
+    status: "draft",
+    validFrom: "2026-06-01",
+    validTo: "2026-09-01",
+    rateItems: [
       {
-        id: 'qr-4',
-        scenario: 'IMP',
-        fromLocationId: 'loc-port-1',
-        toLocationId: 'loc-cust-3',
-        containerSize: '20GP',
-        baseRate: 350,
-        additionalSurcharges: [
-          { code: 'FAF', amount: 35 }
-        ]
+        id: 'ri-3',
+        containerType: "20GP",
+        containerTypeId: "ct-20gp",
+        originZoneId: "zone-c",
+        destinationZoneId: "zone-d",
+        baseRate: 22000,
+        currency: "INR",
+        returnLegRate: 0,
+        estimatedFuelSurcharge: 2640,
+        applicableSurcharges: [],
+        totalEstimatedValue: 24640,
+        rotRequired: false,
+        notes: "Inland draft"
       }
     ],
-    surcharges: [
-      { code: 'FAF', name: 'Fuel Adjustment (FAF)', amount: 35, unit: 'Flat Rate', autoTrigger: 'Always' }
-    ],
-    demurrageFreeDays: 5,
-    detentionFreeDays: 4,
-    demurrageFlatRate: 180,
-    detentionFlatRate: 180
+    totalValue: 24640,
+    currency: "INR",
+    internalNotes: "",
+    customerNotes: "Inland Logistics Co",
+    createdBy: "user-admin",
+    createdAt: "2026-06-01T00:00:00Z",
+    updatedAt: "2026-06-01T00:00:00Z"
   }
 ];
 
@@ -426,6 +621,7 @@ export const createMilestonesForScenario = (scenario: ScenarioType): MilestoneSt
 export const INITIAL_JOBS: Job[] = [
   {
     id: 'job-1',
+    regionId: 'IN',
     jobNo: 'JB-2026-1001',
     tenantId: 'tenant-1',
     customerId: 'cust-1',
@@ -450,10 +646,14 @@ export const INITIAL_JOBS: Job[] = [
     milestones: createMilestonesForScenario('IMP'),
     currentMilestoneIndex: 1, // Currently at Terminal Gate-In
     hasDynamicInsertion: false,
-    extraSurchargesIncurred: []
+    extraSurchargesIncurred: [],
+    gateOutTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    freeTimeDays: 7,
+    freeTimeExpiry: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
   },
   {
     id: 'job-2',
+    regionId: 'IN',
     jobNo: 'JB-2026-1002',
     tenantId: 'tenant-1',
     customerId: 'cust-2',
@@ -478,10 +678,16 @@ export const INITIAL_JOBS: Job[] = [
     milestones: createMilestonesForScenario('EXP'),
     currentMilestoneIndex: 0,
     hasDynamicInsertion: false,
-    extraSurchargesIncurred: []
+    extraSurchargesIncurred: [],
+    gateOutTimestamp: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    freeTimeDays: 7,
+    freeTimeExpiry: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    detentionLiability: "customer",
+    detentionChargeAmount: 5000
   },
   {
     id: 'job-3',
+    regionId: 'IN',
     jobNo: 'JB-2026-1003',
     tenantId: 'tenant-1',
     customerId: 'cust-1',
@@ -502,25 +708,31 @@ export const INITIAL_JOBS: Job[] = [
     milestones: createMilestonesForScenario('RETURN'),
     currentMilestoneIndex: 0,
     hasDynamicInsertion: false,
-    extraSurchargesIncurred: []
+    extraSurchargesIncurred: [],
+    gateOutTimestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+    gateInTimestamp: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    freeTimeDays: 7,
+    freeTimeExpiry: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // Completed on time
+    detentionLiability: null,
+    detentionChargeAmount: 0
   }
 ];
 
 export const INITIAL_ROTS: ROT[] = [
-  { id: 'rot-1', jobId: 'job-1', rotNo: 'ROT-992110', status: 'confirmed', gateReleaseCode: 'REL-MSC-84192', depotExpiry: '2026-05-30', verifiedBy: 'Office Dispatch Admin' },
-  { id: 'rot-2', jobId: 'job-2', rotNo: 'ROT-554109', status: 'draft', gateReleaseCode: 'REL-CMA-22180', depotExpiry: '2026-06-02' }
+  { id: 'rot-1', regionId: 'IN', jobId: 'job-1', rotNo: 'ROT-992110', status: 'confirmed', gateReleaseCode: 'REL-MSC-84192', depotExpiry: '2026-05-30', verifiedBy: 'Office Dispatch Admin' },
+  { id: 'rot-2', regionId: 'IN', jobId: 'job-2', rotNo: 'ROT-554109', status: 'draft', gateReleaseCode: 'REL-CMA-22180', depotExpiry: '2026-06-02' }
 ];
 
 export const INITIAL_CONS_NOTES: ConsignmentNote[] = [
-  { id: 'cn-1', jobId: 'job-1', cnNo: 'CN-2026-88001', status: 'issued', printed: true },
-  { id: 'cn-2', jobId: 'job-2', cnNo: 'CN-2026-88002', status: 'draft', printed: false }
+  { id: 'cn-1', regionId: 'IN', jobId: 'job-1', cnNo: 'CN-2026-88001', status: 'issued', printed: true },
+  { id: 'cn-2', regionId: 'IN', jobId: 'job-2', cnNo: 'CN-2026-88002', status: 'draft', printed: false }
 ];
 
 export const DEFAULT_ZONES: Zone[] = [
-  { id: 'zone-a', name: 'Zone A (Port Gates)', code: 'ZN-PRT-A', type: 'Port Sector', description: 'Horizon terminal docks and customs bypass precinct.' },
-  { id: 'zone-b', name: 'Zone B (Inland East)', code: 'ZN-INL-B', type: 'Inland Corridor', description: 'Depot dry-stacks and eastern transfer terminals.' },
-  { id: 'zone-c', name: 'Zone C (North Coast)', code: 'ZN-NTH-C', type: 'Industrial Hub', description: 'Northern seaside chemical and heavy engineering complexes.' },
-  { id: 'zone-d', name: 'Zone D (West Industrial)', code: 'ZN-WST-D', type: 'Industrial Hub', description: 'Western dry cargo warehouses and furniture plants.' }
+  { id: 'zone-a', regionId: 'IN', name: 'Zone A (Port Gates)', code: 'ZN-PRT-A', type: 'Port Sector', description: 'Horizon terminal docks and customs bypass precinct.' },
+  { id: 'zone-b', regionId: 'IN', name: 'Zone B (Inland East)', code: 'ZN-INL-B', type: 'Inland Corridor', description: 'Depot dry-stacks and eastern transfer terminals.' },
+  { id: 'zone-c', regionId: 'IN', name: 'Zone C (North Coast)', code: 'ZN-NTH-C', type: 'Industrial Hub', description: 'Northern seaside chemical and heavy engineering complexes.' },
+  { id: 'zone-d', regionId: 'IN', name: 'Zone D (West Industrial)', code: 'ZN-WST-D', type: 'Industrial Hub', description: 'Western dry cargo warehouses and furniture plants.' }
 ];
 
 export const DEFAULT_ZONE_TYPES: ZoneType[] = [
@@ -530,10 +742,46 @@ export const DEFAULT_ZONE_TYPES: ZoneType[] = [
 ];
 
 export const INITIAL_USERS: User[] = [
-  { id: 'user-admin', name: 'Office Administrator', email: 'admin@atlas-haulage.com', role: 'administrator', isActive: true },
-  { id: 'user-dispatch', name: 'Dispatch Board Coordinator', email: 'dispatch@atlas-haulage.com', role: 'dispatcher', isActive: true },
-  { id: 'user-billing', name: 'Billing Specialist', email: 'billing@atlas-haulage.com', role: 'billing', isActive: true },
-  { id: 'user-driver', name: 'Bob Johnson', email: 'driver@atlas-haulage.com', role: 'driver_emulator', isActive: true }
+  { 
+    id: 'user-admin', 
+    name: 'Office Administrator', 
+    email: 'admin@atlas-haulage.com', 
+    role: 'administrator', 
+    isActive: true,
+    regionId: null,
+    regionAccess: ["ALL"],
+    userLevel: "corporate_admin"
+  },
+  { 
+    id: 'user-dispatch', 
+    name: 'Dispatch Board Coordinator', 
+    email: 'dispatch@atlas-haulage.com', 
+    role: 'dispatcher', 
+    isActive: true,
+    regionId: 'IN',
+    regionAccess: ['IN'],
+    userLevel: "region_user"
+  },
+  { 
+    id: 'user-billing', 
+    name: 'Billing Specialist', 
+    email: 'billing@atlas-haulage.com', 
+    role: 'billing', 
+    isActive: true,
+    regionId: 'UAE',
+    regionAccess: ['UAE'],
+    userLevel: "region_user"
+  },
+  { 
+    id: 'user-driver', 
+    name: 'Bob Johnson', 
+    email: 'driver@atlas-haulage.com', 
+    role: 'driver_emulator', 
+    isActive: true,
+    regionId: 'IN',
+    regionAccess: ['IN'],
+    userLevel: "region_user"
+  }
 ];
 
 export const INITIAL_SMTP_CONFIG: SmtpConfig = {
@@ -570,5 +818,297 @@ export const INITIAL_EMAIL_TEMPLATES: EmailTemplate[] = [
     body: 'Finance Ledger Account Service,\n\nWe have dispatched invoice Number {{invoiceNo}} in relation to dispatch job {{jobNo}}.\n\nSubTotal Amount: ${{subTotal}}\nTax Surcharges: ${{taxAmount}}\nTotal Outstanding Remittance Due: ${{totalAmount}}\n\nPlease remit balances matching Net payment terms.\n\nRegards,\nFinance Billing Department',
     variables: ['invoiceNo', 'jobNo', 'totalAmount', 'subTotal', 'taxAmount']
   }
+];
+
+export const INITIAL_SHIPPING_LINES: ShippingLine[] = [
+  {
+    id: 'ship-maersk',
+    name: 'Maersk Line',
+    scacCode: 'MAEU',
+    shortCode: 'Maersk',
+    logoColor: '#2563EB', // Blue
+    freeTimeDays: 7,
+    detentionRatePerDay: 5000,
+    currency: 'INR',
+    regionId: 'IN',
+    isActive: true
+  },
+  {
+    id: 'ship-msc',
+    name: 'Mediterranean Shipping Company',
+    scacCode: 'MSCU',
+    shortCode: 'MSC',
+    logoColor: '#F59E0B', // Amber
+    freeTimeDays: 7,
+    detentionRatePerDay: 5000,
+    currency: 'INR',
+    regionId: 'IN',
+    isActive: true
+  },
+  {
+    id: 'ship-cma',
+    name: 'CMA CGM',
+    scacCode: 'CMDU',
+    shortCode: 'CMA CGM',
+    logoColor: '#10B981', // Emerald
+    freeTimeDays: 7,
+    detentionRatePerDay: 5000,
+    currency: 'INR',
+    regionId: 'IN',
+    isActive: true
+  },
+  {
+    id: 'ship-evergreen',
+    name: 'Evergreen Marine Corporation',
+    scacCode: 'EISU',
+    shortCode: 'Evergreen',
+    logoColor: '#059669', // Dark Emerald
+    freeTimeDays: 7,
+    detentionRatePerDay: 5000,
+    currency: 'INR',
+    regionId: 'IN',
+    isActive: true
+  }
+];
+
+export const INITIAL_VESSELS: Vessel[] = [
+  {
+    id: 'vess-1',
+    vesselName: 'Maersk Eindhoven',
+    imoNumber: '9778534',
+    shippingLineId: 'ship-maersk',
+    flag: 'Panama',
+    vesselType: 'Container Ship',
+    isActive: true
+  },
+  {
+    id: 'vess-2',
+    vesselName: 'MSC Oscar',
+    imoNumber: '9703318',
+    shippingLineId: 'ship-msc',
+    flag: 'Panama',
+    vesselType: 'Container Ship',
+    isActive: true
+  },
+  {
+    id: 'vess-3',
+    vesselName: 'CMA CGM Antoine de Saint Exupery',
+    imoNumber: '9776418',
+    shippingLineId: 'ship-cma',
+    flag: 'France',
+    vesselType: 'Container Ship',
+    isActive: true
+  },
+  {
+    id: 'vess-4',
+    vesselName: 'Ever Given',
+    imoNumber: '9811000',
+    shippingLineId: 'ship-evergreen',
+    flag: 'Panama',
+    vesselType: 'Container Ship',
+    isActive: true
+  }
+];
+
+export const INITIAL_VENDORS: Vendor[] = [
+  {
+    id: 'vend-1',
+    vendorName: 'Indo-Haulage Subcontractors',
+    vendorCode: 'IHS-IN-01',
+    contactPerson: 'Rahul Sharma',
+    phone: '+91 98765 43210',
+    email: 'ops@indohaulage.co.in',
+    address: 'Plot 42, Port Access Road, Chennai',
+    regionId: 'IN',
+    taxId: '33AAAAA1111A1Z1',
+    paymentTerms: 'Net 30',
+    specialization: 'Haulage',
+    isActive: true
+  },
+  {
+    id: 'vend-2',
+    vendorName: 'Gateway Customs & Freight Services',
+    vendorCode: 'GCF-IN-02',
+    contactPerson: 'Meera Nair',
+    phone: '+91 99887 76655',
+    email: 'info@gatewaycustoms.com',
+    address: 'Regus Palace, Marine Lines, Mumbai',
+    regionId: 'IN',
+    taxId: '27BBBBB2222B2Z2',
+    paymentTerms: 'Net 15',
+    specialization: 'Customs',
+    isActive: true
+  },
+  {
+    id: 'vend-3',
+    vendorName: 'All-In-One Logistics Solutions',
+    vendorCode: 'AOL-IN-03',
+    contactPerson: 'Vikram Singh',
+    phone: '+91 91234 56789',
+    email: 'partner@alloneops.com',
+    address: 'Sardar Patel Ring Road, Ahmedabad',
+    regionId: 'IN',
+    taxId: '24CCCCC3333C3Z3',
+    paymentTerms: 'Net 45',
+    specialization: 'Both',
+    isActive: true
+  }
+];
+
+export const INITIAL_CONTAINER_TYPES: ContainerType[] = [
+  {
+    id: 'ct-20gp',
+    code: '20GP',
+    name: '20ft General Purpose',
+    isoCode: '22G1',
+    lengthFt: 20,
+    heightFt: 8.5,
+    tareWeightKg: 2200,
+    maxPayloadKg: 28200,
+    category: 'Dry',
+    isActive: true
+  },
+  {
+    id: 'ct-40gp',
+    code: '40GP',
+    name: '40ft General Purpose',
+    isoCode: '42G1',
+    lengthFt: 40,
+    heightFt: 8.5,
+    tareWeightKg: 3750,
+    maxPayloadKg: 28750,
+    category: 'Dry',
+    isActive: true
+  },
+  {
+    id: 'ct-40hc',
+    code: '40HC',
+    name: '40ft High Cube',
+    isoCode: '45G1',
+    lengthFt: 40,
+    heightFt: 9.5,
+    tareWeightKg: 3900,
+    maxPayloadKg: 28600,
+    category: 'Dry',
+    isActive: true
+  },
+  {
+    id: 'ct-20rf',
+    code: '20RF',
+    name: '20ft Reefer (Refrigerated)',
+    isoCode: '22R1',
+    lengthFt: 20,
+    heightFt: 8.5,
+    tareWeightKg: 3200,
+    maxPayloadKg: 27280,
+    category: 'Reefer',
+    isActive: true
+  },
+  {
+    id: 'ct-40rf',
+    code: '40RF',
+    name: '40ft Reefer (Refrigerated)',
+    isoCode: '45R1',
+    lengthFt: 40,
+    heightFt: 9.5,
+    tareWeightKg: 4800,
+    maxPayloadKg: 27700,
+    category: 'Reefer',
+    isActive: true
+  },
+  {
+    id: 'ct-45hc',
+    code: '45HC',
+    name: '45ft High Cube',
+    isoCode: 'EG10',
+    lengthFt: 45,
+    heightFt: 9.5,
+    tareWeightKg: 4850,
+    maxPayloadKg: 27850,
+    category: 'Dry',
+    isActive: true
+  }
+];
+
+export const INITIAL_INVOICE_SETTINGS: InvoiceSettings[] = [
+  {
+    id: 'is-in',
+    regionId: 'IN',
+    invoicePrefix: 'INV-IN',
+    currentSequence: 1,
+    defaultPaymentTerms: 'Net 30',
+    defaultDueDays: 30,
+    taxLabel: 'GST',
+    taxRate: 18,
+    showTaxBreakdown: true,
+    footerNote: "Thank you for your business. Payment due within 30 days.",
+    bankName: "HDFC Bank",
+    bankAccountNo: "XXXX-XXXX-1234",
+    bankSwiftCode: "HDFCINBB",
+    autoCreateOnJobClose: true,
+    requireApprovalBeforeSend: true
+  },
+  {
+    id: 'is-ae',
+    regionId: 'AE',
+    invoicePrefix: 'INV-AE',
+    currentSequence: 1,
+    defaultPaymentTerms: 'Net 15',
+    defaultDueDays: 15,
+    taxLabel: 'VAT',
+    taxRate: 5,
+    showTaxBreakdown: true,
+    footerNote: "شكراً لتعاملكم معنا",
+    bankName: "Emirates NBD",
+    bankAccountNo: "AE070331234567890123456",
+    bankSwiftCode: "EBILAEAD",
+    autoCreateOnJobClose: false,
+    requireApprovalBeforeSend: true
+  }
+];
+
+export const INITIAL_SUPPORTED_LANGUAGES: SupportedLanguage[] = [
+  { id: "lang-en", code: "en", name: "English", nativeName: "English", isRTL: false, isActive: true },
+  { id: "lang-ta", code: "ta", name: "Tamil", nativeName: "தமிழ்", isRTL: false, isActive: true },
+  { id: "lang-ar", code: "ar", name: "Arabic", nativeName: "العربية", isRTL: true, isActive: true },
+  { id: "lang-ms", code: "ms", name: "Bahasa Melayu", nativeName: "Bahasa", isRTL: false, isActive: true },
+  { id: "lang-fr", code: "fr", name: "French", nativeName: "Français", isRTL: false, isActive: false },
+  { id: "lang-hi", code: "hi", name: "Hindi", nativeName: "हिंदी", isRTL: false, isActive: false },
+];
+
+export const INITIAL_TRANSLATIONS: TranslationEntry[] = [
+  // Tamil CN document field translations
+  { id: "tr-ta-cn-shipper", languageCode: "ta", category: "document_field", key: "shipper", englishValue: "Shipper Details", translatedValue: "ஏற்றுமதியாளர்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-consignee", languageCode: "ta", category: "document_field", key: "consignee", englishValue: "Consignee Details", translatedValue: "பெறுநர்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-containerno", languageCode: "ta", category: "document_field", key: "container_no", englishValue: "Container No", translatedValue: "கண்டெய்னர் எண்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-sealno", languageCode: "ta", category: "document_field", key: "seal_no", englishValue: "Seal No", translatedValue: "சீல் எண்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-grossweight", languageCode: "ta", category: "document_field", key: "gross_weight", englishValue: "Gross Weight", translatedValue: "மொத்த எடை", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-description", languageCode: "ta", category: "document_field", key: "description", englishValue: "Description of Goods", translatedValue: "பொருள் விவரம்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-drivername", languageCode: "ta", category: "document_field", key: "driver_name", englishValue: "Driver Name", translatedValue: "ஓட்டுனர் பெயர்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-vehicleno", languageCode: "ta", category: "document_field", key: "vehicle_no", englishValue: "Vehicle No", translatedValue: "வாகன எண்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-dateofissue", languageCode: "ta", category: "document_field", key: "date_of_issue", englishValue: "Date of Issue", translatedValue: "வெளியீட்டு தேதி", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-placeofloading", languageCode: "ta", category: "document_field", key: "place_of_loading", englishValue: "Place of Loading", translatedValue: "ஏற்றும் இடம்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-placeofdelivery", languageCode: "ta", category: "document_field", key: "place_of_delivery", englishValue: "Place of Delivery", translatedValue: "டெலிவரி இடம்", documentType: "CN", isVerified: true },
+  { id: "tr-ta-cn-signature", languageCode: "ta", category: "document_field", key: "signature", englishValue: "Signature", translatedValue: "கையொப்பம்", documentType: "CN", isVerified: true },
+
+  // Tamil status labels
+  { id: "tr-ta-st-active", languageCode: "ta", category: "status_label", key: "active", englishValue: "active", translatedValue: "செயலில்", documentType: "ALL", isVerified: true },
+  { id: "tr-ta-st-completed", languageCode: "ta", category: "status_label", key: "completed", englishValue: "completed", translatedValue: "நிறைவடைந்தது", documentType: "ALL", isVerified: true },
+  { id: "tr-ta-st-pending", languageCode: "ta", category: "status_label", key: "pending", englishValue: "pending", translatedValue: "நிலுவையில்", documentType: "ALL", isVerified: true },
+  { id: "tr-ta-st-cancelled", languageCode: "ta", category: "status_label", key: "cancelled", englishValue: "cancelled", translatedValue: "ரத்து செய்யப்பட்டது", documentType: "ALL", isVerified: true },
+
+  // Arabic CN document field translations
+  { id: "tr-ar-cn-shipper", languageCode: "ar", category: "document_field", key: "shipper", englishValue: "Shipper Details", translatedValue: "الشاحن", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-consignee", languageCode: "ar", category: "document_field", key: "consignee", englishValue: "Consignee Details", translatedValue: "المرسل إليه", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-containerno", languageCode: "ar", category: "document_field", key: "container_no", englishValue: "Container No", translatedValue: "رقم الحاوية", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-sealno", languageCode: "ar", category: "document_field", key: "seal_no", englishValue: "Seal No", translatedValue: "رقم الختم", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-grossweight", languageCode: "ar", category: "document_field", key: "gross_weight", englishValue: "Gross Weight", translatedValue: "الوزن الإجمالي", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-description", languageCode: "ar", category: "document_field", key: "description", englishValue: "Description of Goods", translatedValue: "وصف البضاعة", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-drivername", languageCode: "ar", category: "document_field", key: "driver_name", englishValue: "Driver Name", translatedValue: "اسم السائق", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-vehicleno", languageCode: "ar", category: "document_field", key: "vehicle_no", englishValue: "Vehicle No", translatedValue: "رقم المركبة", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-dateofissue", languageCode: "ar", category: "document_field", key: "date_of_issue", englishValue: "Date of Issue", translatedValue: "تاريخ الإصدار", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-placeofloading", languageCode: "ar", category: "document_field", key: "place_of_loading", englishValue: "Place of Loading", translatedValue: "مكان التحميل", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-placeofdelivery", languageCode: "ar", category: "document_field", key: "place_of_delivery", englishValue: "Place of Delivery", translatedValue: "مكان التسليم", documentType: "CN", isVerified: true },
+  { id: "tr-ar-cn-signature", languageCode: "ar", category: "document_field", key: "signature", englishValue: "Signature", translatedValue: "التوقيع", documentType: "CN", isVerified: true },
 ];
 

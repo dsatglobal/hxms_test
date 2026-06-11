@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { ConsignmentNote, Job, Customer, LocationGeo } from '../types';
+import { ConsignmentNote, Job, Customer, LocationGeo, SupportedLanguage, TranslationEntry, Region, Driver, Vehicle } from '../types';
 import { 
   FileText, 
   Search, 
@@ -86,6 +86,11 @@ interface ConsignmentNoteMasterProps {
   customers: Customer[];
   locations: LocationGeo[];
   onUpdateCns?: (cns: ConsignmentNote[]) => void;
+  translations: TranslationEntry[];
+  supportedLanguages: SupportedLanguage[];
+  regions: Region[];
+  drivers?: Driver[];
+  vehicles?: Vehicle[];
 }
 
 export default function ConsignmentNoteMaster({
@@ -93,7 +98,12 @@ export default function ConsignmentNoteMaster({
   jobs,
   customers,
   locations,
-  onUpdateCns
+  onUpdateCns,
+  translations,
+  supportedLanguages,
+  regions,
+  drivers = [],
+  vehicles = []
 }: ConsignmentNoteMasterProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'issued' | 'signed'>('all');
@@ -514,159 +524,231 @@ export default function ConsignmentNoteMaster({
 
       {/* Multilingual Printable template modal dialogue overlay */}
       <AnimatePresence>
-        {printCnId && printCn && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-lg max-w-2xl w-full border border-slate-300 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              {/* Close Cross icon */}
-              <button 
-                id="close-cn-print-modal"
-                onClick={() => setPrintCnId(null)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition p-1 bg-slate-100 rounded-full z-10"
+        {printCnId && printCn && (() => {
+          // Resolve region, languages, and actual data helpers
+          const pJob = jobs.find(j => j.id === printCn.jobId);
+          const pRegion = regions.find(r => r.id === pJob?.regionId || r.code === pJob?.regionId);
+          const secondaryLanguageCode = pRegion?.secondaryLanguage || 'ta';
+          const secondaryLangConfig = supportedLanguages.find(l => l.code === secondaryLanguageCode) || {
+            code: 'ta',
+            name: 'Tamil',
+            nativeName: 'தமிழ்',
+            isRTL: false,
+            isActive: true
+          };
+          const isRTL = secondaryLangConfig.isRTL;
+
+          const pDriver = drivers.find(d => d.id === pJob?.driverId);
+          const pVehicle = vehicles.find(v => v.id === pJob?.vehicleId);
+          const pCustomer = pJob ? customers.find(c => c.id === pJob.customerId) : null;
+          const pFromLoc = pJob ? locations.find(l => l.id === pJob.originLocationId) : null;
+          const pToLoc = pJob ? locations.find(l => l.id === pJob.destinationLocationId) : null;
+
+          const getTranslation = (key: string, languageCode: string): string => {
+            return translations.find(
+              t => t.key === key && t.languageCode === languageCode
+            )?.translatedValue ?? key;
+          };
+
+          // Data structure mapping for the 12 required fields
+          const dualFields = [
+            {
+              key: 'shipper',
+              enLabel: 'Shipper Details',
+              arTaKey: 'shipper',
+              value: pCustomer?.name || 'ATLAS LOGISTICS HUB'
+            },
+            {
+              key: 'consignee',
+              enLabel: 'Consignee Details',
+              arTaKey: 'consignee',
+              value: pCustomer?.name || 'CONSIGNEE TERMINAL CO'
+            },
+            {
+              key: 'container_no',
+              enLabel: 'Container No',
+              arTaKey: 'container_no',
+              value: pJob?.containerNo || 'N/A'
+            },
+            {
+              key: 'seal_no',
+              enLabel: 'Seal No',
+              arTaKey: 'seal_no',
+              value: pJob?.sealNo || 'N/A'
+            },
+            {
+              key: 'gross_weight',
+              enLabel: 'Gross Weight',
+              arTaKey: 'gross_weight',
+              value: pJob?.weightKg ? `${pJob.weightKg.toLocaleString()} KG` : 'N/A'
+            },
+            {
+              key: 'description',
+              enLabel: 'Description of Goods',
+              arTaKey: 'description',
+              value: 'GENERAL IMPORT FREIGHT CONTAINER'
+            },
+            {
+              key: 'driver_name',
+              enLabel: 'Driver Name',
+              arTaKey: 'driver_name',
+              value: pDriver?.name || 'UNASSIGNED FLEET DRIVER'
+            },
+            {
+              key: 'vehicle_no',
+              enLabel: 'Vehicle No',
+              arTaKey: 'vehicle_no',
+              value: pVehicle?.plateNumber || 'N/A'
+            },
+            {
+              key: 'date_of_issue',
+              enLabel: 'Date of Issue',
+              arTaKey: 'date_of_issue',
+              value: pJob?.scheduledTime ? new Date(pJob.scheduledTime).toLocaleDateString() : new Date().toLocaleDateString()
+            },
+            {
+              key: 'place_of_loading',
+              enLabel: 'Place of Loading',
+              arTaKey: 'place_of_loading',
+              value: pFromLoc ? `${pFromLoc.name} (${pFromLoc.code})` : 'N/A'
+            },
+            {
+              key: 'place_of_delivery',
+              enLabel: 'Place of Delivery',
+              arTaKey: 'place_of_delivery',
+              value: pToLoc ? `${pToLoc.name} (${pToLoc.code})` : 'N/A'
+            },
+            {
+              key: 'signature',
+              enLabel: 'Signature / Handover status',
+              arTaKey: 'signature',
+              value: printCn.recipientSignedBy ? `Signed: ${printCn.recipientSignedBy}` : 'Pending Consignee Stamp'
+            }
+          ];
+
+          return (
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-lg max-w-2xl w-full border border-slate-300 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]"
               >
-                <X className="w-4 h-4" />
-              </button>
-
-              {/* Printable container */}
-              <div className="p-8 overflow-y-auto space-y-6" id="cn-bilingual-print-body">
-                {/* Print Title block in dual language */}
-                <div className="border-b-2 border-slate-900 pb-5 text-center relative space-y-1">
-                  <div className="font-extrabold tracking-widest text-slate-500 text-[10px] uppercase font-mono">BILINGUAL HAULAGE CONSIGNMENT SHEET</div>
-                  <h1 className="text-lg font-black font-sans text-slate-950 uppercase tracking-tight">CONSIGNMENT NOTE (C.N.)</h1>
-                  <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wide font-sans">{currentLangDict.consignment_note}</h2>
-                  <div className="font-mono text-xs text-slate-500 font-bold mt-1">
-                    CN SERIAL: {printCn.cnNo} • {currentLangDict.cn_serial}
-                  </div>
-                  <div className="absolute top-0 left-0">
-                    <span className="bg-slate-950 text-white font-mono text-[9px] px-2 py-0.5 rounded font-bold uppercase select-none">HMS-SAAS</span>
-                  </div>
-                </div>
-
-                {/* Printable Fields Table in Dual Language */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-xs">
-                  {/* Field 1: Customer */}
-                  <div className="space-y-1 bg-slate-50 p-2.5 rounded border border-slate-200">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>CUSTOMER REGISTERED</span>
-                      <span className="text-right">{currentLangDict.customer}</span>
-                    </div>
-                    <strong className="text-slate-900 block font-bold text-sm">{printCustomer?.name}</strong>
-                  </div>
-
-                  {/* Field 2: Leg scenario */}
-                  <div className="space-y-1 bg-slate-50 p-2.5 rounded border border-slate-200">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>TRANSIT CORRIDOR</span>
-                      <span className="text-right">{currentLangDict.leg_transit}</span>
-                    </div>
-                    <strong className="text-blue-700 block font-bold font-mono uppercase">[{printJob?.scenario}] Inter-Zone Leg</strong>
-                  </div>
-
-                  {/* Field 3: Container ID */}
-                  <div className="space-y-1 border-b border-slate-100 pb-2">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>CONTAINER SERIAL ID</span>
-                      <span className="text-right">{currentLangDict.container_no}</span>
-                    </div>
-                    <strong className="text-slate-900 block font-mono font-bold text-sm mt-1">{printJob?.containerNo || 'N/A'}</strong>
-                  </div>
-
-                  {/* Field 4: Seal No */}
-                  <div className="space-y-1 border-b border-slate-100 pb-2">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>CUSTOMS SEAL BULLET ID</span>
-                      <span className="text-right">{currentLangDict.seal_no}</span>
-                    </div>
-                    <strong className="text-slate-900 block font-mono font-bold text-sm mt-1">{printJob?.sealNo || 'N/A'}</strong>
-                  </div>
-
-                  {/* Field 5: Origin */}
-                  <div className="space-y-1 border-b border-slate-100 pb-2 col-span-2">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>TRANSIT DEPOT RANGE ORIGIN</span>
-                      <span className="text-right">{currentLangDict.origin}</span>
-                    </div>
-                    <strong className="text-slate-800 text-xs mt-1 block">{printFromLoc?.name} ({printFromLoc?.code})</strong>
-                  </div>
-
-                  {/* Field 6: Destination */}
-                  <div className="space-y-1 border-b border-slate-100 pb-2 col-span-2">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>DELIVERY POINT DESPATCH</span>
-                      <span className="text-right">{currentLangDict.destination}</span>
-                    </div>
-                    <strong className="text-slate-800 text-xs mt-1 block">{printToLoc?.name} ({printToLoc?.code})</strong>
-                  </div>
-
-                  {/* Field 7: Weight */}
-                  <div className="space-y-2 col-span-2 pt-1">
-                    <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                      <span>OFFICIAL WEIGHT CERTIFIED</span>
-                      <span className="text-right">{currentLangDict.weight}</span>
-                    </div>
-                    <strong className="text-slate-900 block font-mono font-bold whitespace-nowrap">
-                      {printJob?.weightKg.toLocaleString()} KG • {Math.round((printJob?.weightKg || 1) * 2.20462).toLocaleString()} LBS (Dual standard)
-                    </strong>
-                  </div>
-                </div>
-
-                {/* General Disclaimer Carrier block in dual language */}
-                <div className="border border-slate-200 bg-slate-50 rounded-lg p-4 text-[10px] text-slate-500 leading-relaxed font-sans font-medium space-y-2.5">
-                  <p className="font-bold text-slate-700">HMS Conditions of Carriage / حد المخطط والشروط القانونية:</p>
-                  <p>{currentLangDict.carrier_disclaimer}</p>
-                  <p>English Translation: Cargo remains at owner's liability inside depots after road tax validations have been completed unless gross misconduct is proved by local terminal authorities.</p>
-                </div>
-
-                {/* Handover signs and stamps */}
-                <div className="grid grid-cols-2 gap-8 pt-8 border-t border-slate-200 text-xs">
-                  <div className="text-center pt-8 border-t border-dashed border-slate-300 space-y-1">
-                    <div className="text-[10px] font-mono font-bold text-slate-400">DESPATCH COURIER STAMP</div>
-                    <div className="font-black text-slate-800 italic mt-1">ATLAS CENTRAL LINES</div>
-                  </div>
-                  <div className="text-center pt-8 border-t border-dashed border-slate-300 space-y-1.5">
-                    <div className="text-[10px] font-mono font-bold text-slate-400 flex justify-between">
-                      <span>CONSIGNEE RECEIVER SIGN</span>
-                      <span>{currentLangDict.recipient_sig}</span>
-                    </div>
-                    {printCn.status === 'signed' ? (
-                      <div className="font-sans font-extrabold text-blue-600 bg-blue-50 py-1 rounded inline-block px-3 border border-blue-200">
-                        Signed: {printCn.recipientSignedBy}
-                      </div>
-                    ) : (
-                      <div className="text-slate-400 italic mt-1">Signature Pending Site Handover</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom footer button area */}
-              <div className="bg-slate-50 border-t border-slate-100 p-4 flex gap-3 justify-end shrink-0">
-                <button
-                  id="cancel-cn-print"
+                {/* Close Cross icon */}
+                <button 
+                  id="close-cn-print-modal"
                   onClick={() => setPrintCnId(null)}
-                  className="px-4 py-2 border border-slate-200 text-slate-600 hover:text-slate-850 rounded text-xs font-bold transition"
+                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition p-1 bg-slate-100 rounded-full z-10"
                 >
-                  Cancel
+                  <X className="w-4 h-4" />
                 </button>
-                <button
-                  id="execute-cn-print"
-                  onClick={() => {
-                    alert(`Document ${printCn.cnNo} processed successfully with dual language ${selectedLanguage} printing template.`);
-                    printCn.printed = true;
-                    setPrintCnId(null);
-                  }}
-                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
-                >
-                  <Printer className="w-3.5 h-3.5" /> Print Multilingual CN
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+
+                {/* Printable container */}
+                <div className="p-8 overflow-y-auto space-y-6" id="cn-bilingual-print-body overflow-x-hidden">
+                  {/* Print Title block in dual language */}
+                  <div className="border-b-2 border-slate-900 pb-5 text-center relative space-y-1">
+                    <div className="font-extrabold tracking-widest text-slate-500 text-[10px] uppercase font-mono">BILINGUAL HAULAGE CONSIGNMENT SHEET</div>
+                    <h1 className="text-lg font-black font-sans text-slate-950 uppercase tracking-tight">CONSIGNMENT NOTE (C.N.)</h1>
+                    <div className="grid grid-cols-2 gap-4 text-xs font-bold pt-1">
+                      <div className="text-left text-slate-600">English Language Version</div>
+                      <div className={`text-right text-indigo-700 ${isRTL ? 'text-right' : 'text-left'}`} dir={isRTL ? 'rtl' : 'ltr'}>
+                        {secondaryLangConfig.name} Overlay ({secondaryLangConfig.nativeName})
+                      </div>
+                    </div>
+                    <div className="font-mono text-xs text-slate-500 font-bold mt-1">
+                      CN SERIAL: {printCn.cnNo}
+                    </div>
+                    <div className="absolute top-0 left-0">
+                      <span className="bg-slate-950 text-white font-mono text-[9px] px-2 py-0.5 rounded font-bold uppercase select-none">HMS-SAAS</span>
+                    </div>
+                  </div>
+
+                  {/* Two column dual-language grid layout as requested */}
+                  <div className="divide-y divide-slate-150 border-t border-b border-slate-200">
+                    {dualFields.map(field => {
+                      const translatedLabel = getTranslation(field.arTaKey, secondaryLanguageCode);
+                      return (
+                        <div key={field.key} className="py-3 grid grid-cols-2 gap-6 items-start">
+                          {/* Left Column: English Labels + actual value */}
+                          <div className="space-y-1 text-left">
+                            <span className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider text-slate-400">
+                              {field.enLabel}
+                            </span>
+                            <span className="block text-xs font-semibold text-slate-800 break-words font-mono">
+                              {field.value}
+                            </span>
+                          </div>
+
+                          {/* Right Column: Translated Labels + same value (RTL formatted if necessary) */}
+                          <div className={`space-y-1 ${isRTL ? 'text-right' : 'text-left'}`} dir={isRTL ? 'rtl' : 'ltr'}>
+                            <span className="block text-[10px] font-bold text-indigo-500 uppercase tracking-wider">
+                              {translatedLabel}
+                            </span>
+                            <span className="block text-xs font-extrabold text-slate-900 break-words font-mono">
+                              {field.value}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* General Disclaimer Carrier block in dual language */}
+                  <div className="border border-slate-200 bg-slate-50 rounded-lg p-4 text-[10px] text-slate-500 leading-relaxed font-sans font-medium space-y-2.5">
+                    <p className="font-bold text-slate-700">HMS Conditions of Carriage / நிபந்தனைகள்:</p>
+                    <p>English: Local carrier responsibility guidelines apply as dictated by national transportation statutes.</p>
+                    <p className={`${isRTL ? 'text-right' : 'text-left'}`} dir={isRTL ? 'rtl' : 'ltr'}>
+                      {getTranslation('carrier_disclaimer', secondaryLanguageCode)}
+                    </p>
+                  </div>
+
+                  {/* Handover signs and stamps */}
+                  <div className="grid grid-cols-2 gap-8 pt-6 text-xs">
+                    <div className="text-center pt-6 border-t border-dashed border-slate-300 space-y-1">
+                      <div className="text-[10px] font-mono font-bold text-slate-400 font-bold">DESPATCH COURIER STAMP</div>
+                      <div className="font-black text-slate-850 italic mt-1 text-slate-700">ATLAS CONTAINER LINE</div>
+                    </div>
+                    <div className="text-center pt-6 border-t border-dashed border-slate-300 space-y-1.5">
+                      <div className="text-[10px] font-mono font-bold text-slate-400 flex justify-between">
+                        <span>CONSIGNEE RECEIVER SIGN</span>
+                        <span dir={isRTL ? 'rtl' : 'ltr'}>{getTranslation('signature', secondaryLanguageCode)}</span>
+                      </div>
+                      {printCn.status === 'signed' ? (
+                        <div className="font-sans font-extrabold text-blue-600 bg-blue-50 py-1 rounded inline-block px-3 border border-blue-200">
+                          Signed: {printCn.recipientSignedBy}
+                        </div>
+                      ) : (
+                        <div className="text-slate-400 italic mt-1">Signature Pending Site Handover</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom footer button area */}
+                <div className="bg-slate-50 border-t border-slate-100 p-4 flex gap-3 justify-end shrink-0">
+                  <button
+                    id="cancel-cn-print"
+                    onClick={() => setPrintCnId(null)}
+                    className="px-4 py-2 border border-slate-200 text-slate-600 hover:text-slate-850 rounded text-xs font-bold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    id="execute-cn-print"
+                    onClick={() => {
+                      alert(`Document ${printCn.cnNo} processed successfully with dual language ${secondaryLangConfig.name} overlay.`);
+                      printCn.printed = true;
+                      setPrintCnId(null);
+                    }}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Print Multilingual CN
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Customer, Quotation, LocationGeo, SurchargeRule, TariffRate, ScenarioType, ContainerSizeCode, QuotationRateItem } from '../types';
+import { Customer, Quotation, LocationGeo, SurchargeRule, TariffRate, ScenarioType, ContainerSizeCode, QuotationRateItem, ShippingLine, ContainerType } from '../types';
 import { Plus, Check, FileText, ChevronRight, AlertCircle, Sparkles, DollarSign, Trash2, Printer, Eye, RotateCcw, ShieldAlert, ExternalLink, Award, CheckCircle2, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SURCHARGE_CATALOG, BASE_TARIFFS } from '../data';
@@ -13,30 +13,37 @@ interface QuotationWizardProps {
   quotations: Quotation[];
   customers: Customer[];
   locations: LocationGeo[];
+  shippingLines: ShippingLine[];
+  containerTypes: ContainerType[];
   onAddQuotation: (quote: Quotation) => void;
   onConfirmQuotation: (quoteId: string) => void;
   onNavigate: (tab: string) => void;
   onConvertToBooking: (customerId: string, quoteId: string, rateItemId?: string) => void;
+  quoteSequence: number;
+  onIncrementQuoteSequence: () => void;
 }
 
 export default function QuotationWizard({
   quotations,
   customers,
   locations,
+  shippingLines,
+  containerTypes,
   onAddQuotation,
   onConfirmQuotation,
   onNavigate,
-  onConvertToBooking
+  onConvertToBooking,
+  quoteSequence,
+  onIncrementQuoteSequence
 }: QuotationWizardProps) {
   const [activeTab, setActiveTab] = useState<'directory' | 'create'>('directory');
+  const [activeStep, setActiveStep] = useState(1); // 4-step wizard
   
   // Create state
   const [customerId, setCustomerId] = useState('');
-  const [effectiveDate, setEffectiveDate] = useState('2026-05-25');
-  const [expiryDate, setExpiryDate] = useState('2026-12-31');
   const [rates, setRates] = useState<QuotationRateItem[]>([]);
   const [notes, setNotes] = useState('');
-  const [selectedSurchargeCodes, setSelectedSurchargeCodes] = useState<string[]>(['FAF', 'PORT_FEE']);
+  const [selectedSurchargeCodes, setSelectedSurchargeCodes] = useState<string[]>(['FAF', 'CONG']);
   const [surchargeOverrides, setSurchargeOverrides] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     SURCHARGE_CATALOG.forEach(s => {
@@ -44,6 +51,25 @@ export default function QuotationWizard({
     });
     return initial;
   });
+  const [validFrom, setValidFrom] = useState(new Date().toISOString().split('T')[0]);
+  const [validTo, setValidTo] = useState(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+  const [proposalStep, setProposalStep] = useState(1);
+  const [formData, setFormData] = useState<Partial<Quotation>>({
+    scenario: 'IMP',
+    currency: 'INR',
+    customerNotes: '',
+    internalNotes: '',
+  });
+
+  const wizardSteps = [
+    { id: 1, title: "Basic Information" },
+    { id: 2, title: "Route & Rates" },
+    { id: 3, title: "Surcharges" },
+    { id: 4, title: "Review & Save" }
+  ];
+
+  const handleNext = () => setProposalStep(prev => Math.min(prev + 1, 4));
+  const handleBack = () => setProposalStep(prev => Math.max(prev - 1, 1));
 
   // State overrides representing the 7 points of premium commercial logic
   const [paymentTermsOverride, setPaymentTermsOverride] = useState('Net 30 Days');
@@ -58,16 +84,16 @@ export default function QuotationWizard({
   // Trigger auto surcharges based on special equipment cargo options
   React.useEffect(() => {
     if (isHazmatOnly) {
-      if (!selectedSurchargeCodes.includes('WASH_FEE')) {
-        setSelectedSurchargeCodes(prev => [...prev, 'WASH_FEE']);
+      if (!selectedSurchargeCodes.includes('CONG')) {
+        setSelectedSurchargeCodes(prev => [...prev, 'CONG']);
       }
     }
   }, [isHazmatOnly]);
 
   React.useEffect(() => {
     if (requiresGenset) {
-      if (!selectedSurchargeCodes.includes('CHAS_HOLD')) {
-        setSelectedSurchargeCodes(prev => [...prev, 'CHAS_HOLD']);
+      if (!selectedSurchargeCodes.includes('CHASSIS')) {
+        setSelectedSurchargeCodes(prev => [...prev, 'CHASSIS']);
       }
     }
   }, [requiresGenset]);
@@ -179,8 +205,8 @@ export default function QuotationWizard({
       tenantId: 'tenant-1',
       customerId,
       status,
-      effectiveDate,
-      expiryDate,
+      validFrom,
+      validTo,
       rates,
       surcharges: calculatedSurcharges,
       notes: notes || undefined,
@@ -217,7 +243,7 @@ export default function QuotationWizard({
     setDetentionFreeDays(5);
     setDemurrageFlatRate(150);
     setDetentionFlatRate(150);
-    setSelectedSurchargeCodes(['FAF', 'PORT_FEE']);
+    setSelectedSurchargeCodes(['FAF', 'CONG']);
     setSurchargeOverrides(() => {
       const initial: Record<string, number> = {};
       SURCHARGE_CATALOG.forEach(s => {
@@ -436,7 +462,7 @@ export default function QuotationWizard({
                                           ? 'bg-amber-50 text-amber-800 border-amber-200' 
                                           : 'bg-blue-50 text-blue-800 border-blue-100'
                                       }`}
-                                      title={`${s.name} (${s.unit})`}
+                                      title={`${s.name} (${s.calculationMethod})`}
                                     >
                                       {s.code}: ${s.amount}
                                       {isOverridden && <span className="text-[7px] bg-amber-200 font-sans px-1 text-amber-900 rounded scale-90 font-black">NEG</span>}
@@ -466,8 +492,8 @@ export default function QuotationWizard({
                                   type="button"
                                   onClick={() => {
                                     setCustomerId(quote.customerId);
-                                    setEffectiveDate(quote.effectiveDate);
-                                    setExpiryDate(quote.expiryDate);
+                                    setValidFrom(quote.validFrom);
+                                    setValidTo(quote.validTo);
                                     setRates(quote.rates);
                                     setNotes(quote.notes || '');
                                     setPaymentTermsOverride(quote.paymentTermsOverride || 'Net 30 Days');
@@ -571,8 +597,8 @@ export default function QuotationWizard({
                   <label className="text-xs font-bold text-slate-500 font-sans">Agreement Effective *</label>
                   <input
                     type="date"
-                    value={effectiveDate}
-                    onChange={(e) => setEffectiveDate(e.target.value)}
+                    value={validFrom}
+                    onChange={(e) => setValidFrom(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-700 font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -580,8 +606,8 @@ export default function QuotationWizard({
                   <label className="text-xs font-bold text-slate-500 font-sans">Agreement Expiration *</label>
                   <input
                     type="date"
-                    value={expiryDate}
-                    onChange={(e) => setExpiryDate(e.target.value)}
+                    value={validTo}
+                    onChange={(e) => setValidTo(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-700 font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -800,7 +826,7 @@ export default function QuotationWizard({
                   <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
                   <p className="font-medium animate-pulse">
                     <strong className="font-extrabold uppercase text-[9px] tracking-wide inline-block bg-emerald-100 px-1.5 rounded mr-1.5">Hazmat Verified</strong> 
-                    Steam clean Wash Surcharge (<strong>WASH_FEE</strong>) has been automatically selected at default rate ($150.00).
+                    Port Congestion Fee Surcharge (<strong>CONG</strong>) has been automatically selected at default rate.
                   </p>
                 </div>
               )}
@@ -810,7 +836,7 @@ export default function QuotationWizard({
                   <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0" />
                   <p className="font-medium">
                     <strong className="font-extrabold uppercase text-[9px] tracking-wide inline-block bg-sky-100 px-1.5 rounded mr-1.5">Genset Verified</strong> 
-                    Extended chassis idle parking surcharge (<strong>CHAS_HOLD</strong>) is recommended and auto-selected for Night Holdovers.
+                    Extended chassis idle parking surcharge (<strong>CHASSIS</strong>) is recommended and auto-selected for Night Holdovers.
                   </p>
                 </div>
               )}
@@ -873,11 +899,11 @@ export default function QuotationWizard({
                     <select
                       value={contSize}
                       onChange={(e) => setContSize(e.target.value as ContainerSizeCode)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
+                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-bold"
                     >
-                      <option value="20GP">20GP - Standard (8'6)</option>
-                      <option value="40GP">40GP - Heavy (8'6)</option>
-                      <option value="40HC">40HC - High Cube (9'6)</option>
+                      {containerTypes.filter(ct => ct.isActive).map(ct => (
+                        <option key={ct.id} value={ct.code}>{ct.code} — {ct.name} ({ct.category})</option>
+                      ))}
                     </select>
                   </div>
 
@@ -1009,7 +1035,7 @@ export default function QuotationWizard({
                         <div className="space-y-1.5 flex-1 min-w-0">
                           <div className="font-bold text-slate-700 truncate" title={sch.name}>{sch.name}</div>
                           <div className="text-[10px] text-slate-400 font-mono">
-                            Standard: ${sch.amount} • {sch.unit}
+                            Standard: ${sch.amount} • {sch.calculationMethod}
                           </div>
                           
                           {/* Surcharge Amount Override Input Field */}

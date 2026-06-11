@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LocationGeo, LocationType, Zone, ZoneType, Region, Country } from '../types';
+import { LocationGeo, LocationType, Zone, ZoneType, Region, Country, SupportedLanguage, MasterTranslation } from '../types';
 import { Plus, MapPin, Compass, Shield, Settings, Sliders, List, Trash2, Link, Globe, Flag } from 'lucide-react';
+import LanguageSwitcher from './LanguageSwitcher';
 
 interface LocationZoneMasterProps {
   locations: LocationGeo[];
@@ -20,6 +21,10 @@ interface LocationZoneMasterProps {
   onAddCountry: (c: Country) => void;
   onUpdateCountry: (c: Country) => void;
   onDeleteCountry: (cId: string) => void;
+  supportedLanguages: SupportedLanguage[];
+  masterTranslations: MasterTranslation[];
+  onAddMasterTranslation: (trans: MasterTranslation) => void;
+  onUpdateMasterTranslation: (trans: MasterTranslation) => void;
 }
 
 export default function LocationZoneMaster({
@@ -39,7 +44,11 @@ export default function LocationZoneMaster({
   onDeleteRegion,
   onAddCountry,
   onUpdateCountry,
-  onDeleteCountry
+  onDeleteCountry,
+  supportedLanguages,
+  masterTranslations,
+  onAddMasterTranslation,
+  onUpdateMasterTranslation
 }: LocationZoneMasterProps) {
   
   const [activeSubTab, setActiveSubTab] = useState<'locations' | 'zones' | 'regions' | 'countries'>('locations');
@@ -84,6 +93,44 @@ export default function LocationZoneMaster({
   // Filtering
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Location Translation States
+  const [locActiveLanguageCode, setLocActiveLanguageCode] = useState<string>('en');
+  const [locTranslatedName, setLocTranslatedName] = useState('');
+  const [locSaveMessage, setLocSaveMessage] = useState('');
+
+  React.useEffect(() => {
+    if (editingLoc && locActiveLanguageCode !== 'en') {
+      const match = masterTranslations.find(
+        t => t.masterRecordId === editingLoc.id && 
+             t.languageCode === locActiveLanguageCode && 
+             t.masterType === 'location_type'
+      );
+      setLocTranslatedName(match?.translatedName || '');
+    } else {
+      setLocTranslatedName('');
+    }
+    setLocSaveMessage('');
+  }, [editingLoc, locActiveLanguageCode, masterTranslations]);
+
+  // Zone Translation States
+  const [zoneActiveLanguageCode, setZoneActiveLanguageCode] = useState<string>('en');
+  const [zoneTranslatedName, setZoneTranslatedName] = useState('');
+  const [zoneSaveMessage, setZoneSaveMessage] = useState('');
+
+  React.useEffect(() => {
+    if (editingZone && zoneActiveLanguageCode !== 'en') {
+      const match = masterTranslations.find(
+        t => t.masterRecordId === editingZone.id && 
+             t.languageCode === zoneActiveLanguageCode && 
+             t.masterType === 'zone_type'
+      );
+      setZoneTranslatedName(match?.translatedName || '');
+    } else {
+      setZoneTranslatedName('');
+    }
+    setZoneSaveMessage('');
+  }, [editingZone, zoneActiveLanguageCode, masterTranslations]);
+
   const resetLocForm = () => {
     setEditingLoc(null);
     setLocName('');
@@ -95,6 +142,9 @@ export default function LocationZoneMaster({
     setLocLng(250);
     setLocZone('');
     setLocGeofence(300);
+    setLocActiveLanguageCode('en');
+    setLocTranslatedName('');
+    setLocSaveMessage('');
     setShowLocForm(false);
   };
 
@@ -104,6 +154,9 @@ export default function LocationZoneMaster({
     setZoneCode('');
     setZoneType('');
     setZoneDesc('');
+    setZoneActiveLanguageCode('en');
+    setZoneTranslatedName('');
+    setZoneSaveMessage('');
     setShowZoneForm(false);
   };
 
@@ -168,6 +221,38 @@ export default function LocationZoneMaster({
 
   const handleLocSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (editingLoc && locActiveLanguageCode !== 'en') {
+      const existingTranslation = masterTranslations.find(
+        t => t.masterRecordId === editingLoc.id && 
+             t.languageCode === locActiveLanguageCode && 
+             t.masterType === 'location_type'
+      );
+
+      if (existingTranslation) {
+        onUpdateMasterTranslation({
+          ...existingTranslation,
+          translatedName: locTranslatedName.trim(),
+          isVerified: true,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        onAddMasterTranslation({
+          id: `mt-loc-${editingLoc.id}-${locActiveLanguageCode}-${Date.now()}`,
+          languageCode: locActiveLanguageCode,
+          masterType: 'location_type',
+          masterRecordId: editingLoc.id,
+          translatedName: locTranslatedName.trim(),
+          isVerified: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      setLocSaveMessage(`Translation for ${supportedLanguages.find(l => l.code === locActiveLanguageCode)?.name || locActiveLanguageCode} saved successfully.`);
+      setTimeout(() => setLocSaveMessage(''), 3000);
+      return;
+    }
+
     if (!locName.trim() || !locCode.trim() || !locZone || !locUnLocode.trim() || !locCountryId) {
       alert('Location Name, Internal Code, UN/LOCODE, Country and Zone mapping are all required.');
       return;
@@ -202,6 +287,38 @@ export default function LocationZoneMaster({
 
   const handleZoneSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (editingZone && zoneActiveLanguageCode !== 'en') {
+      const existingTranslation = masterTranslations.find(
+        t => t.masterRecordId === editingZone.id && 
+             t.languageCode === zoneActiveLanguageCode && 
+             t.masterType === 'zone_type'
+      );
+
+      if (existingTranslation) {
+        onUpdateMasterTranslation({
+          ...existingTranslation,
+          translatedName: zoneTranslatedName.trim(),
+          isVerified: true,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        onAddMasterTranslation({
+          id: `mt-zone-${editingZone.id}-${zoneActiveLanguageCode}-${Date.now()}`,
+          languageCode: zoneActiveLanguageCode,
+          masterType: 'zone_type',
+          masterRecordId: editingZone.id,
+          translatedName: zoneTranslatedName.trim(),
+          isVerified: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      setZoneSaveMessage(`Translation for ${supportedLanguages.find(l => l.code === zoneActiveLanguageCode)?.name || zoneActiveLanguageCode} saved successfully.`);
+      setTimeout(() => setZoneSaveMessage(''), 3000);
+      return;
+    }
+
     if (!zoneName.trim() || !zoneCode.trim()) {
       alert('Zone Name and Code are mandatory.');
       return;
@@ -436,28 +553,63 @@ export default function LocationZoneMaster({
                 <button onClick={resetLocForm} className="text-slate-400 hover:text-slate-600 font-bold">Cancel</button>
               </div>
 
-              <form onSubmit={handleLocSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium text-slate-600">
-                <div className="space-y-1">
-                  <label className="block font-bold">Node Name / Station <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Container Depot Terminal"
-                    value={locName}
-                    onChange={(e) => setLocName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
-                  />
+              {editingLoc && (
+                <div className="bg-slate-50 border border-slate-200/60 rounded p-3 mb-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Magento-Style Store view Translation</span>
+                    <LanguageSwitcher
+                      supportedLanguages={supportedLanguages}
+                      activeLanguageCode={locActiveLanguageCode}
+                      onLanguageChange={setLocActiveLanguageCode}
+                    />
+                  </div>
+                  {locSaveMessage && (
+                    <span className="bg-emerald-50 text-emerald-700 text-[10px] uppercase tracking-wider font-extrabold px-3 py-1 rounded border border-emerald-200/60 shrink-0">
+                      {locSaveMessage}
+                    </span>
+                  )}
                 </div>
+              )}
+
+              <form onSubmit={handleLocSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium text-slate-600">
+                {locActiveLanguageCode === 'en' ? (
+                  <div className="space-y-1">
+                    <label className="block font-bold">Node Name / Station <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Container Depot Terminal"
+                      value={locName}
+                      onChange={(e) => setLocName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1 bg-blue-50/20 border border-blue-200/50 p-2.5 rounded">
+                    <label className="block text-[10px] uppercase font-black tracking-wider text-slate-400">Base English reference Name</label>
+                    <div className="font-sans text-slate-800 font-black text-xs mb-2 bg-slate-100/60 px-2 py-1 rounded">{locName || "N/A"}</div>
+                    <label className="block font-bold">Translated Name ({supportedLanguages.find(l => l.code === locActiveLanguageCode)?.name}) <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={`Enter translation in ${supportedLanguages.find(l => l.code === locActiveLanguageCode)?.name || locActiveLanguageCode}...`}
+                      value={locTranslatedName}
+                      onChange={(e) => setLocTranslatedName(e.target.value)}
+                      className="w-full bg-white border border-blue-300 rounded px-2.5 py-1.5 text-slate-800 font-extrabold"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="block font-bold">Internal System Code <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     required
+                    disabled={locActiveLanguageCode !== 'en'}
                     placeholder="e.g. PORT-SEC-B"
                     value={locCode}
                     onChange={(e) => setLocCode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase disabled:opacity-60"
                   />
                 </div>
 
@@ -466,11 +618,12 @@ export default function LocationZoneMaster({
                   <input
                     type="text"
                     required
+                    disabled={locActiveLanguageCode !== 'en'}
                     maxLength={5}
                     placeholder="e.g. SGPIN"
                     value={locUnLocode}
                     onChange={(e) => setLocUnLocode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase disabled:opacity-60"
                   />
                 </div>
 
@@ -478,9 +631,10 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Sovereign Country Mapping <span className="text-red-500">*</span></label>
                   <select
                     required
+                    disabled={locActiveLanguageCode !== 'en'}
                     value={locCountryId}
                     onChange={(e) => setLocCountryId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold disabled:opacity-60"
                   >
                     <option value="">-- Mapped Country --</option>
                     {countries.map(c => (
@@ -493,8 +647,9 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Logistics Type <span className="text-red-500">*</span></label>
                   <select
                     value={locType}
+                    disabled={locActiveLanguageCode !== 'en'}
                     onChange={(e) => setLocType(e.target.value as LocationType)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold disabled:opacity-60"
                   >
                     <option value="port">PORT TERMINAL GATE</option>
                     <option value="depot">CONTAINER DRY STACK DEPOT</option>
@@ -507,9 +662,10 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Map Position X (Latitude)</label>
                   <input
                     type="number"
+                    disabled={locActiveLanguageCode !== 'en'}
                     value={locLat}
                     onChange={(e) => setLocLat(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 disabled:opacity-60"
                   />
                 </div>
 
@@ -517,9 +673,10 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Map Position Y (Longitude)</label>
                   <input
                     type="number"
+                    disabled={locActiveLanguageCode !== 'en'}
                     value={locLng}
                     onChange={(e) => setLocLng(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 disabled:opacity-60"
                   />
                 </div>
 
@@ -527,8 +684,9 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Assigned Pricing Zone <span className="text-red-500">*</span></label>
                   <select
                     value={locZone}
+                    disabled={locActiveLanguageCode !== 'en'}
                     onChange={(e) => setLocZone(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 font-bold disabled:opacity-60"
                   >
                     <option value="">-- Mapped Zone Cluster --</option>
                     {zones.map(z => (
@@ -541,9 +699,10 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Geofence Radius (meters)</label>
                   <input
                     type="number"
+                    disabled={locActiveLanguageCode !== 'en'}
                     value={locGeofence}
                     onChange={(e) => setLocGeofence(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 disabled:opacity-60"
                   />
                 </div>
 
@@ -552,7 +711,9 @@ export default function LocationZoneMaster({
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-1.5 rounded transition"
                   >
-                    Create Registered Node
+                    {locActiveLanguageCode === 'en' 
+                      ? (editingLoc ? 'Update Registered Node' : 'Create Registered Node') 
+                      : `Save ${supportedLanguages.find(l => l.code === locActiveLanguageCode)?.name || locActiveLanguageCode} Translation`}
                   </button>
                 </div>
               </form>
@@ -569,28 +730,63 @@ export default function LocationZoneMaster({
                 <button onClick={resetZoneForm} className="text-slate-400 hover:text-slate-600 font-bold">Cancel</button>
               </div>
 
-              <form onSubmit={handleZoneSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium text-slate-600">
-                <div className="space-y-1">
-                  <label className="block font-bold">Zone Sector Label Name <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Zone D (West Corridor)"
-                    value={zoneName}
-                    onChange={(e) => setZoneName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
-                  />
+              {editingZone && (
+                <div className="bg-slate-50 border border-slate-200/60 rounded p-3 mb-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Magento-Style Store view Translation</span>
+                    <LanguageSwitcher
+                      supportedLanguages={supportedLanguages}
+                      activeLanguageCode={zoneActiveLanguageCode}
+                      onLanguageChange={setZoneActiveLanguageCode}
+                    />
+                  </div>
+                  {zoneSaveMessage && (
+                    <span className="bg-emerald-50 text-emerald-700 text-[10px] uppercase tracking-wider font-extrabold px-3 py-1 rounded border border-emerald-200/60 shrink-0">
+                      {zoneSaveMessage}
+                    </span>
+                  )}
                 </div>
+              )}
+
+              <form onSubmit={handleZoneSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium text-slate-600">
+                {zoneActiveLanguageCode === 'en' ? (
+                  <div className="space-y-1">
+                    <label className="block font-bold">Zone Sector Label Name <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Zone D (West Corridor)"
+                      value={zoneName}
+                      onChange={(e) => setZoneName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1 bg-blue-50/20 border border-blue-200/50 p-2.5 rounded">
+                    <label className="block text-[10px] uppercase font-black tracking-wider text-slate-400">Base English reference Name</label>
+                    <div className="font-sans text-slate-800 font-black text-xs mb-2 bg-slate-100/60 px-2 py-1 rounded">{zoneName || "N/A"}</div>
+                    <label className="block font-bold">Translated Name ({supportedLanguages.find(l => l.code === zoneActiveLanguageCode)?.name}) <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={`Enter translation in ${supportedLanguages.find(l => l.code === zoneActiveLanguageCode)?.name || zoneActiveLanguageCode}...`}
+                      value={zoneTranslatedName}
+                      onChange={(e) => setZoneTranslatedName(e.target.value)}
+                      className="w-full bg-white border border-blue-300 rounded px-2.5 py-1.5 text-slate-800 font-extrabold"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="block font-bold">Zone ISO Code Descriptor <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     required
+                    disabled={zoneActiveLanguageCode !== 'en'}
                     placeholder="e.g. ZN-WST-CORR"
                     value={zoneCode}
                     onChange={(e) => setZoneCode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono text-slate-800 uppercase disabled:opacity-60"
                   />
                 </div>
 
@@ -598,8 +794,9 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Cluster Functional Classification Type</label>
                   <select
                     value={zoneType}
+                    disabled={zoneActiveLanguageCode !== 'en'}
                     onChange={(e) => setZoneType(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 disabled:opacity-60"
                   >
                     {zoneTypes.map(zt => (
                       <option key={zt.id} value={zt.name}>{zt.name}</option>
@@ -611,10 +808,11 @@ export default function LocationZoneMaster({
                   <label className="block font-bold">Detailed Operational Bounds Boundary</label>
                   <input
                     type="text"
+                    disabled={zoneActiveLanguageCode !== 'en'}
                     placeholder="Limits bounded by heavy prime-mover transit bypass highways..."
                     value={zoneDesc}
                     onChange={(e) => setZoneDesc(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-800 disabled:opacity-60"
                   />
                 </div>
 
@@ -623,7 +821,9 @@ export default function LocationZoneMaster({
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-1.5 rounded transition"
                   >
-                    Save Pricing Zone
+                    {zoneActiveLanguageCode === 'en' 
+                      ? 'Save Pricing Zone' 
+                      : `Save ${supportedLanguages.find(l => l.code === zoneActiveLanguageCode)?.name || zoneActiveLanguageCode} Translation`}
                   </button>
                 </div>
               </form>

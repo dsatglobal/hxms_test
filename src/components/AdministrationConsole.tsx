@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Tenant, User, UserRole, SmtpConfig, EmailTemplate } from '../types';
+import { Tenant, User, UserRole, SmtpConfig, EmailTemplate, Region, SupportedLanguage, TranslationEntry } from '../types';
 import { 
   Building, 
   Users, 
@@ -15,8 +15,10 @@ import {
   Edit, 
   Check, 
   ArrowRight,
-  Server
+  Server,
+  Globe2
 } from 'lucide-react';
+import TranslationManager from './TranslationManager';
 
 interface AdministrationConsoleProps {
   activeTenant: Tenant;
@@ -32,6 +34,13 @@ interface AdministrationConsoleProps {
   onUpdateSmtpConfig: (cfg: SmtpConfig) => void;
   emailTemplates: EmailTemplate[];
   onUpdateTemplate: (tpl: EmailTemplate) => void;
+  regions: Region[];
+  // Translation support
+  translations: TranslationEntry[];
+  supportedLanguages: SupportedLanguage[];
+  onUpdateLanguage: (lang: SupportedLanguage) => void;
+  onAddTranslation: (entry: TranslationEntry) => void;
+  onUpdateTranslation: (entry: TranslationEntry) => void;
 }
 
 export default function AdministrationConsole({
@@ -45,10 +54,16 @@ export default function AdministrationConsole({
   smtpConfig,
   onUpdateSmtpConfig,
   emailTemplates,
-  onUpdateTemplate
+  onUpdateTemplate,
+  regions,
+  translations,
+  supportedLanguages,
+  onUpdateLanguage,
+  onAddTranslation,
+  onUpdateTranslation
 }: AdministrationConsoleProps) {
 
-  const [activeAdminTab, setActiveAdminTab] = useState<'profile' | 'users' | 'smtp' | 'postgres'>('profile');
+  const [activeAdminTab, setActiveAdminTab] = useState<'profile' | 'users' | 'smtp' | 'postgres' | 'translation'>('profile');
 
   // Company Profile states
   const [tenantName, setTenantName] = useState(activeTenant.name);
@@ -56,6 +71,7 @@ export default function AdministrationConsole({
   const [tenantCurrency, setTenantCurrency] = useState(activeTenant.currency);
   const [tenantWeightUnit, setTenantWeightUnit] = useState(activeTenant.weightUnit);
   const [tenantLogoColor, setTenantLogoColor] = useState(activeTenant.logoColor);
+  const [tenantReportingCurrency, setTenantReportingCurrency] = useState(activeTenant.reportingCurrency ?? "USD");
 
   // SMTP state
   const [smtpHost, setSmtpHost] = useState(smtpConfig.host);
@@ -70,6 +86,7 @@ export default function AdministrationConsole({
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('dispatcher');
+  const [newUserRegionId, setNewUserRegionId] = useState<string>('');
 
   // Mail Templates Builder State
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(emailTemplates[0]?.id || '');
@@ -93,7 +110,8 @@ export default function AdministrationConsole({
       subdomain: tenantSubdomain,
       currency: tenantCurrency,
       weightUnit: tenantWeightUnit,
-      logoColor: tenantLogoColor
+      logoColor: tenantLogoColor,
+      reportingCurrency: tenantReportingCurrency
     });
     alert('Tenant Settings and parameters synchronized successfully.');
   };
@@ -115,16 +133,47 @@ export default function AdministrationConsole({
     e.preventDefault();
     if (!newUserName.trim() || !newUserEmail.trim()) return;
 
+    if (newUserRole !== 'administrator' && !newUserRegionId) {
+      alert('Sovereign region assignment is required for regional operators.');
+      return;
+    }
+
+    let userLevel: "corporate_admin" | "region_admin" | "region_user" | "driver" = "region_user";
+    let regionId: string | null = null;
+    let regionAccess: string[] = [];
+
+    if (newUserRole === 'administrator') {
+      userLevel = "corporate_admin";
+      regionId = null;
+      regionAccess = ["ALL"];
+    } else if (newUserRole === 'region_admin') {
+      userLevel = "region_admin";
+      regionId = newUserRegionId;
+      regionAccess = [newUserRegionId];
+    } else if (newUserRole === 'driver') {
+      userLevel = "driver";
+      regionId = newUserRegionId;
+      regionAccess = [newUserRegionId];
+    } else {
+      userLevel = "region_user";
+      regionId = newUserRegionId;
+      regionAccess = [newUserRegionId];
+    }
+
     onAddUser({
       id: `usr-${Date.now()}`,
       name: newUserName.trim(),
       email: newUserEmail.trim(),
       role: newUserRole,
-      isActive: true
+      isActive: true,
+      regionId,
+      regionAccess,
+      userLevel
     });
 
     setNewUserName('');
     setNewUserEmail('');
+    setNewUserRegionId('');
     setShowAddUserForm(false);
   };
 
@@ -367,6 +416,18 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
             <Database className="w-3.5 h-3.5 text-blue-600" /> PostgreSQL Schema Generator
           </span>
         </button>
+
+        <button
+          id="admin-translation-tab"
+          onClick={() => setActiveAdminTab('translation')}
+          className={`pb-3 border-b-2 transition ${
+            activeAdminTab === 'translation' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <span className="flex items-center gap-1">
+            <Globe2 className="w-3.5 h-3.5 text-blue-600" /> Dual-Language Translations
+          </span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-6">
@@ -416,6 +477,25 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                     onChange={(e) => setTenantCurrency(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-mono"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block">Consolidated Reporting Currency</label>
+                  <select
+                    value={tenantReportingCurrency}
+                    onChange={(e) => setTenantReportingCurrency(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800"
+                  >
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="GBP">GBP</option>
+                    <option value="SGD">SGD</option>
+                    <option value="AED">AED</option>
+                    <option value="INR">INR</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400">
+                    Used when viewing all regions combined in the corporate dashboard
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -511,7 +591,7 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                 </div>
 
                 {showAddUserForm && (
-                  <form onSubmit={handleCreateUser} className="bg-slate-50 border border-slate-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <form onSubmit={handleCreateUser} className="bg-slate-50 border border-slate-200 p-4 rounded-lg grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div className="space-y-1">
                       <label className="block font-bold">User Name</label>
                       <input
@@ -540,17 +620,50 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                       <label className="block font-bold">Security Role</label>
                       <select
                         value={newUserRole}
-                        onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                        onChange={(e) => {
+                          const val = e.target.value as UserRole;
+                          setNewUserRole(val);
+                          if (val === 'administrator') {
+                            setNewUserRegionId('');
+                          }
+                        }}
                         className="w-full bg-white border border-slate-250 p-1.5 rounded text-slate-800"
                       >
-                        <option value="administrator">administrator</option>
-                        <option value="dispatcher">dispatcher / coordinator</option>
-                        <option value="billing">billing agent / accountant</option>
+                        <option value="administrator">administrator (Corporate Admin)</option>
+                        <option value="region_admin">region_admin (Region Admin)</option>
+                        <option value="dispatcher">dispatcher</option>
+                        <option value="billing">billing</option>
+                        <option value="operations">operations</option>
+                        <option value="driver">driver</option>
                         <option value="driver_emulator">driver emulator</option>
                       </select>
                     </div>
 
-                    <div className="md:col-span-3 pt-1 flex justify-end">
+                    <div className="space-y-1">
+                      <label className="block font-bold">Assign Region</label>
+                      <select
+                        disabled={newUserRole === 'administrator'}
+                        value={newUserRole === 'administrator' ? 'all' : newUserRegionId}
+                        onChange={(e) => setNewUserRegionId(e.target.value)}
+                        required={newUserRole !== 'administrator'}
+                        className="w-full bg-white disabled:bg-slate-100 disabled:text-slate-400 border border-slate-250 p-1.5 rounded text-slate-800"
+                      >
+                        {newUserRole === 'administrator' ? (
+                          <option value="all">All Regions (Corporate Admin)</option>
+                        ) : (
+                          <>
+                            <option value="">-- Select Active Region --</option>
+                            {regions.filter(r => r.isActive !== false).map(r => (
+                              <option key={r.id} value={r.code}>
+                                {r.name} ({r.code})
+                              </option>
+                            ))}
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="md:col-span-4 pt-1 flex justify-end">
                       <button
                         type="submit"
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded"
@@ -568,6 +681,7 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                         <th className="p-3">FULL NAME</th>
                         <th className="p-3">EMAIL ADDRESS</th>
                         <th className="p-3">LOGGED ROLE</th>
+                        <th className="p-3">REGION</th>
                         <th className="p-3">ACCOUNT STATE</th>
                         <th className="p-3">SIMULATE SWITCH</th>
                       </tr>
@@ -580,11 +694,23 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                               u.role === 'administrator' ? 'bg-purple-100 text-purple-700' :
+                              u.role === 'region_admin' ? 'bg-indigo-100 text-indigo-700' :
                               u.role === 'dispatcher' ? 'bg-blue-100 text-blue-700' :
                               u.role === 'billing' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
                             }`}>
                               {u.role}
                             </span>
+                          </td>
+                          <td className="p-3">
+                            {!u.regionId ? (
+                              <span className="inline-block px-2 py-0.5 font-mono text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-100 rounded uppercase tracking-wider">
+                                ALL
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2 py-0.5 font-mono text-[9px] font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded uppercase tracking-wider">
+                                {u.regionId}
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">
                             <button
@@ -629,7 +755,7 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                   <div className="space-y-1 bg-slate-50 p-2.5 rounded border border-slate-150 font-medium">
                     <span className="font-bold text-slate-900 block uppercase font-mono tracking-wide text-[10px]">dispatcher</span>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Read-only financial records. Allowed to create bookings, assign drivers, schedule chassis trips on the Gantt grid, and route trailers.
+                      Read-only financial records. Allowed to create bookings, assign drivers, schedule chassis trips on the Trip Planner grid, and route trailers.
                     </p>
                   </div>
 
@@ -851,6 +977,19 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
               </div>
 
             </div>
+          </div>
+        )}
+
+        {/* Tab 5: Dynamic Translation Management Console */}
+        {activeAdminTab === 'translation' && (
+          <div className="bg-white rounded-lg border border-slate-205 shadow-xs overflow-hidden">
+            <TranslationManager
+              translations={translations}
+              languages={supportedLanguages}
+              onUpdateLanguage={onUpdateLanguage}
+              onAddTranslation={onAddTranslation}
+              onUpdateTranslation={onUpdateTranslation}
+            />
           </div>
         )}
 

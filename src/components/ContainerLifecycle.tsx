@@ -1,238 +1,190 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Job, Customer } from '../types';
-import { Flame, Clock, ShieldAlert, CheckCircle2, Navigation, AlertTriangle, Ship } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Flame, Clock, ShieldAlert, CheckCircle2, Navigation, AlertTriangle, Ship, ChevronRight, X, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface ContainerLifecycleProps {
   jobs: Job[];
   customers: Customer[];
   onTriggerReturnJob: (jobId: string) => void;
+  onUpdateJob: (job: Job) => void;
 }
 
 export default function ContainerLifecycle({
   jobs,
   customers,
-  onTriggerReturnJob
+  onTriggerReturnJob,
+  onUpdateJob
 }: ContainerLifecycleProps) {
-  
-  // Filter active Import/Export containers currently held or active
+  const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
+
+  const selectedContainer = useMemo(() => 
+    selectedContainerId ? jobs.find(j => j.id === selectedContainerId) : null,
+  [selectedContainerId, jobs]);
+
   const monitoredContainers = useMemo(() => {
+    // Current time fixed for mockup
     const CURRENT_TIME = new Date("2026-05-29T05:16:43Z");
-    const contractFreeDays = 3; // 3 days standard contractual free-time
-    const penaltyRate = 85; // $85 per day penalty rate
-
-    return jobs.map((job, idx) => {
-      // Locate when container arrived at customer site
-      // Milestone 4 represents Gate-In at customer warehouse site
-      const arrivalMilestone = job.milestones[4];
-      let arrivalDate = new Date();
+    
+    return jobs.filter(j => j.scenario === 'IMP' || j.scenario === 'EXP').map((job) => {
+      // Calculate days Left and overdue days based on gateOutTimestamp and freeTimeDays
+      let daysLeft = 0;
+      let daysOverdue = 0;
+      let status: 'On Time' | 'Due Today' | 'Warning' | 'Overdue' | 'Returned' | 'Disputed' = 'On Time';
       
-      if (arrivalMilestone && arrivalMilestone.completed && arrivalMilestone.timestamp) {
-        arrivalDate = new Date(arrivalMilestone.timestamp);
-      } else {
-        // Fallback to scheduling index date if not completed
-        const offsetDays = (idx * 17) % 4; // pseudo-realistic offset
-        arrivalDate = new Date("2026-05-26T08:00:00Z");
-        arrivalDate.setDate(arrivalDate.getDate() + offsetDays);
-      }
-
-      // Elapsed time calculation
-      const timeDiff = CURRENT_TIME.getTime() - arrivalDate.getTime();
-      const elapsedDays = Math.max(1, Math.floor(timeDiff / (1000 * 3600 * 24)));
-
-      // Days leftover vs Overdue
-      const daysLeft = Math.max(0, contractFreeDays - elapsedDays);
-      const daysOverdue = Math.max(0, elapsedDays - contractFreeDays);
-      const isCritical = daysLeft <= 1 && daysOverdue === 0;
-
-      // Calculate active penalty
-      const isLadenDelivered = job.currentMilestoneIndex >= 4;
-      const isUnstuffed = job.currentMilestoneIndex >= 5;
-      const isReturnedComplete = job.currentMilestoneIndex >= 6;
-
-      let lifecycleState: 'Port Customs' | 'Laden Transit' | 'At Customer site (Stuffed/Unstuffing)' | 'Container Empty' | 'Returned Depot' = 'Port Customs';
       if (job.status === 'completed') {
-        lifecycleState = 'Returned Depot';
-      } else if (isReturnedComplete) {
-        lifecycleState = 'Returned Depot';
-      } else if (isUnstuffed) {
-        lifecycleState = 'Container Empty';
-      } else if (isLadenDelivered) {
-        lifecycleState = 'At Customer site (Stuffed/Unstuffing)';
-      } else if (job.currentMilestoneIndex > 0) {
-        lifecycleState = 'Laden Transit';
+          status = 'Returned';
+      } else if (job.freeTimeExpiry) {
+          const expiryDate = new Date(job.freeTimeExpiry);
+          const diff = expiryDate.getTime() - CURRENT_TIME.getTime();
+          const diffDays = Math.ceil(diff / (1000 * 3600 * 24));
+          
+          if (diffDays < 0) {
+              daysOverdue = Math.abs(diffDays);
+              status = 'Overdue';
+          } else if (diffDays === 0) {
+              status = 'Due Today';
+          } else if (diffDays <= 3) {
+              status = 'Warning';
+          }
+          daysLeft = Math.max(0, diffDays);
       }
 
-      return {
-        jobId: job.id,
-        jobNo: job.jobNo,
-        containerNo: job.containerNo,
-        containerSize: job.containerSize,
-        scenario: job.scenario,
-        shippingLine: job.shippingLine,
-        customerName: customers.find(c => c.id === job.customerId)?.name || 'Unknown Account',
-        daysLeft: daysOverdue > 0 ? 0 : daysLeft,
-        isCritical,
-        lifecycleState,
-        penaltyAmount: lifecycleState === 'Returned Depot' ? 0 : daysOverdue * penaltyRate,
-        daysOverdue
-      };
-    }).filter(c => c.scenario === 'IMP' || c.scenario === 'EXP'); // focus heavily on IMP/EXP box cycles
-  }, [jobs, customers]);
+      return { ...job, daysLeft, daysOverdue, status };
+    });
+  }, [jobs]);
 
   return (
-    <div className="space-y-6" id="container-lifecycle-monitor">
-      
-      {/* Title */}
-      <div className="border-b border-slate-200 pb-4">
-        <h1 className="text-xl font-bold font-sans tracking-tight text-slate-800 flex items-center gap-2">
-          <Ship className="text-blue-600 w-5 h-5" /> Container Lifecycle &amp; Detention Tracker
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Monitor ocean container custody loops. Automatically alert dispatchers before equipment late return fines (Detention) accumulate.
-        </p>
-      </div>
-
-      {/* Grid summary stats of boxes */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 bg-white border border-slate-200 rounded-lg flex items-center justify-between shadow-xs">
+    <div className="flex h-full w-full bg-slate-50 relative overflow-hidden" id="container-lifecycle-monitor">
+      <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+        {/* Header Bar */}
+        <div className="flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-sans font-extrabold text-slate-400 uppercase block tracking-wider">Under Carrier Custody</span>
-            <div className="text-xl font-bold text-slate-800 font-sans mt-0.5">
-              {monitoredContainers.filter(c => c.lifecycleState !== 'Returned Depot').length} <span className="text-xs text-slate-400 font-normal">Active Boxes</span>
+            <h1 className="text-xl font-bold font-sans tracking-tight text-slate-900">Container & Demurrage Monitor</h1>
+            <p className="text-sm text-slate-500">Track container detention exposure and manage demurrage liability.</p>
+          </div>
+          <div className="flex gap-2">
+            <div className="px-3 py-1.5 bg-red-50 text-red-700 rounded-md border border-red-200 text-sm font-semibold">
+              ₹{monitoredContainers.reduce((acc, c) => acc + (c.detentionChargeAmount || 0), 0).toLocaleString()} at risk
             </div>
           </div>
-          <Clock className="w-5 h-5 text-blue-500" />
         </div>
 
-        <div className="p-4 bg-white border border-slate-200 rounded-lg flex items-center justify-between shadow-xs">
-          <div>
-            <span className="text-[10px] font-sans font-extrabold text-slate-400 uppercase block tracking-wider">Critical Free-Time Expiry</span>
-            <div className="text-xl font-bold text-red-600 font-sans mt-0.5">
-              {monitoredContainers.filter(c => c.daysLeft <= 2 && c.lifecycleState !== 'Returned Depot').length} <span className="text-xs text-slate-400 font-normal">Containers</span>
-            </div>
-          </div>
-          <AlertTriangle className="w-5 h-5 text-red-500 animate-pulse" />
+        {/* Summary Strip */}
+        <div className="grid grid-cols-4 gap-4">
+            {[
+                { label: 'Overdue', value: monitoredContainers.filter(j => j.status === 'Overdue').length, color: 'text-red-600' },
+                { label: 'Due Today', value: monitoredContainers.filter(j => j.status === 'Due Today').length, color: 'text-orange-600' },
+                { label: 'Due in 3 Days', value: monitoredContainers.filter(j => j.status === 'Warning').length, color: 'text-amber-600' },
+                { label: 'Accrued This Month', value: `₹${monitoredContainers.reduce((acc, j) => acc + (j.detentionChargeAmount || 0), 0)/1000}k`, color: 'text-slate-800' }
+            ].map(stat => (
+                <div key={stat.label} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                    <span className="text-xs font-semibold text-slate-500 uppercase block">{stat.label}</span>
+                    <span className={`text-2xl font-bold ${stat.color}`}>{stat.value}</span>
+                </div>
+            ))}
         </div>
 
-        <div className="p-4 bg-white border border-slate-200 rounded-lg flex items-center justify-between shadow-xs">
-          <div>
-            <span className="text-[10px] font-sans font-extrabold text-slate-400 uppercase block tracking-wider font-semibold">Detention Penalties Accrued</span>
-            <div className="text-xl font-bold text-amber-600 font-sans mt-0.5">
-              ${monitoredContainers.reduce((acc, c) => acc + (c.lifecycleState !== 'Returned Depot' ? c.penaltyAmount : 0), 0)} <span className="text-xs text-slate-400 font-normal">Grand Total</span>
-            </div>
-          </div>
-          <Flame className="w-5 h-5 text-amber-500" />
-        </div>
-      </div>
-
-      {/* Container custody ledger table */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
-        <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-          <h2 className="text-xs font-bold uppercase text-slate-500 font-sans">Container Custody Ledger</h2>
-          <span className="text-[10px] text-slate-400 font-mono">Real-time Container GPS Matching</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+        {/* Main Table */}
+        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+        <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-slate-200 text-slate-400 font-sans font-extrabold uppercase tracking-wider pb-3 bg-slate-50">
-                <th className="py-2.5 px-3">Container Serial</th>
-                <th className="px-2">Scenario</th>
-                <th className="px-2">Client Account</th>
-                <th className="px-2">Shipping Line</th>
-                <th className="px-2">Milestone Status</th>
-                <th className="px-2">Free-time Remaining</th>
-                <th className="px-2">Penalty/Accrued</th>
-                <th className="py-2.5 px-3 text-right">Action</th>
+              <tr className="border-b border-slate-100 text-slate-500 font-bold uppercase text-[10px] bg-slate-50">
+                <th className="py-3 px-4">Container</th>
+                <th className="py-3 px-2">Line</th>
+                <th className="py-3 px-2">Customer</th>
+                <th className="py-3 px-2">Status</th>
+                <th className="py-3 px-2">Expiry</th>
+                <th className="py-3 px-2">Liability</th>
+                <th className="py-3 px-2">Amt</th>
+                <th className="py-3 px-2"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {monitoredContainers.map((container, idx) => {
-                const isReturned = container.lifecycleState === 'Returned Depot';
-                
-                return (
-                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-3 font-mono font-bold text-slate-800">
-                      {container.containerNo}
-                      <span className="text-[9px] text-slate-400 block font-sans font-normal">{container.containerSize}</span>
-                    </td>
-                    <td className="px-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold uppercase ${
-                        container.scenario === 'IMP' ? 'text-blue-600 bg-blue-50 border border-blue-200' : 'text-emerald-700 bg-emerald-50 border border-emerald-100'
-                      }`}>
-                        {container.scenario}
-                      </span>
-                    </td>
-                    <td className="font-bold max-w-[150px] truncate text-slate-700 px-2">{container.customerName}</td>
-                    <td className="font-semibold text-slate-500 px-2">
-                      <div className="flex items-center gap-1.5">
-                        <Ship className="w-3.5 h-3.5 text-slate-400" />
-                        {container.shippingLine}
-                      </div>
-                    </td>
-                    <td className="px-2">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                        isReturned 
-                          ? 'bg-green-50 text-green-700 border-green-200' 
-                          : container.lifecycleState === 'Container Empty'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200'
-                      }`}>
-                        {container.lifecycleState}
-                      </span>
-                    </td>
-                    <td className="px-2">
-                      {isReturned ? (
-                        <span className="text-slate-400 font-mono">—</span>
-                      ) : container.daysOverdue && container.daysOverdue > 0 ? (
-                        <span className="font-mono font-black text-red-650 text-red-600 block animate-pulse">
-                          OVERDUE {container.daysOverdue} {container.daysOverdue === 1 ? 'DAY' : 'DAYS'}
-                        </span>
-                      ) : (
-                        <span className={`font-mono font-bold ${container.isCritical ? 'text-red-600' : 'text-slate-500'}`}>
-                          {container.daysLeft} {container.daysLeft === 1 ? 'Day Left' : 'Days Left'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="font-mono px-2">
-                      {isReturned ? (
-                        <span className="text-slate-400">—</span>
-                      ) : container.penaltyAmount > 0 ? (
-                        <span className="text-red-600 font-bold">${container.penaltyAmount}.00</span>
-                      ) : (
-                        <span className="text-slate-400 font-medium">$0.00</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      {isReturned ? (
-                        <span className="text-emerald-700 font-bold bg-green-50 px-2 py-1 rounded inline-flex items-center gap-1 font-mono text-[9px] border border-green-200">
-                          <CheckCircle2 className="w-3 h-3" /> RETURNED
-                        </span>
-                      ) : container.lifecycleState === 'Container Empty' ? (
-                        <button
-                          onClick={() => onTriggerReturnJob(container.jobId)}
-                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-[10px] shadow-xs cursor-pointer transition-colors"
+            <tbody className="divide-y divide-slate-100">
+              {monitoredContainers.map(job => (
+                <tr key={job.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedContainerId(job.id)}>
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900">{job.containerNo}</td>
+                    <td className="py-3 px-2 text-slate-600">{job.shippingLine}</td>
+                    <td className="py-3 px-2 text-slate-600 truncate max-w-[120px]">{customers.find(c => c.id === job.customerId)?.name}</td>
+                    <td className="py-3 px-2"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${job.status === 'Overdue' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'}`}>{job.status}</span></td>
+                    <td className={`py-3 px-2 font-mono font-bold ${job.status === 'Overdue' ? 'text-red-600' : 'text-slate-600'}`}>{job.freeTimeExpiry ? new Date(job.freeTimeExpiry).toLocaleDateString() : '-'}</td>
+                    <td className="py-3 px-2">
+                        <select 
+                            className="text-[10px] bg-transparent border-none outline-none font-bold text-slate-700 uppercase"
+                            value={job.detentionLiability || ''}
+                            onChange={(e) => onUpdateJob({...job, detentionLiability: e.target.value as any})}
+                            onClick={(e) => e.stopPropagation()}
                         >
-                          Trigger Empty Return
-                        </button>
-                      ) : (
-                        <span className="text-slate-400 italic">Unstuff Pending</span>
-                      )}
+                            <option value="">-</option>
+                            <option value="customer">Customer</option>
+                            <option value="company">Company</option>
+                            <option value="disputed">Disputed</option>
+                        </select>
                     </td>
-                  </tr>
-                );
-              })}
+                    <td className="py-3 px-2 font-mono font-bold text-red-600">{job.detentionChargeAmount ? `₹${job.detentionChargeAmount}` : '-'}</td>
+                    <td className="py-3 px-3 text-right">
+                        <button className="text-slate-400 hover:text-slate-600" onClick={(e) => { e.stopPropagation(); setSelectedContainerId(job.id);}}><ChevronRight className="w-4 h-4"/></button>
+                    </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Detail Panel */}
+      <AnimatePresence>
+        {selectedContainer && (
+            <motion.div 
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                className="w-[360px] bg-white border-l border-slate-200 shadow-xl p-6 overflow-y-auto"
+            >
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="font-bold text-lg text-slate-900">Container Details</h2>
+                    <button onClick={() => setSelectedContainerId(null)}><X className="w-5 h-5"/></button>
+                </div>
+                <div className="space-y-4">
+                    <div className="p-3 bg-slate-50 rounded border border-slate-100">
+                        <div className="text-xs text-slate-500">Container No</div>
+                        <div className="font-mono font-bold text-slate-900">{selectedContainer.containerNo}</div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <div className="font-bold text-sm text-slate-900">Timeline</div>
+                        <div className="text-xs space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Gate Out</span>
+                            <span className="font-semibold">{selectedContainer.gateOutTimestamp ? new Date(selectedContainer.gateOutTimestamp).toLocaleDateString() : '-'}</span>
+                          </div>
+                           <div className="flex justify-between">
+                            <span className="text-slate-500">Free Time Expiry</span>
+                            <span className="font-semibold">{selectedContainer.freeTimeExpiry ? new Date(selectedContainer.freeTimeExpiry).toLocaleDateString() : '-'}</span>
+                          </div>
+                        </div>
+                    </div>
+
+                    {selectedContainer.status === 'Overdue' && (
+                      <div className="p-3 bg-red-50 rounded border border-red-200 text-red-800">
+                          <div className="font-bold text-xs">Overdue</div>
+                          <div className="text-sm">Days Overdue: {selectedContainer.daysOverdue}</div>
+                          <div className="font-bold text-lg">Penalty: ₹{selectedContainer.detentionChargeAmount}</div>
+                      </div>
+                    )}
+                    
+                    <div className="space-y-2">
+                      <label className="font-bold text-sm text-slate-900">Detention Notes</label>
+                      <textarea 
+                        className="w-full h-24 p-2 text-sm border border-slate-200 rounded" 
+                        value={selectedContainer.detentionNotes || ''} 
+                        onChange={(e) => onUpdateJob({...selectedContainer, detentionNotes: e.target.value})}
+                      />
+                    </div>
+                </div>
+            </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
