@@ -17,6 +17,10 @@ import {
   Search, Check, X, ExternalLink, Eye, ClipboardList, AlertTriangle,
   RotateCcw, HelpCircle, Package, Ship, MapPin, FileCheck
 } from 'lucide-react';
+import DataTable, { DataTableColumn } from './shared/DataTable';
+import FilterBar from './shared/FilterBar';
+import DetailDrawer from './shared/DetailDrawer';
+import { T, badgeClass, statusLabel } from './shared/ui';
 
 // ── types ────────────────────────────────────────────────────────
 interface RateItemDraft {
@@ -178,7 +182,9 @@ export default function QuotationWizard({
   // ── left panel state ──────────────────────────────────────────
   const [listSearch, setListSearch] = useState('');
   const [listFilter, setListFilter] = useState<'all' | 'draft' | 'pending_approval' | 'confirmed' | 'expired' | 'superseded'>('all');
-  const [listSort, setListSort] = useState<'newest' | 'oldest' | 'name' | 'expiry'>('newest');
+  const [customerFilter, setCustomerFilter] = useState('');
+  const [scenarioFilter, setScenarioFilter] = useState('');
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // ── right panel state ────────────────────────────────────────
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
@@ -254,18 +260,13 @@ export default function QuotationWizard({
       });
     }
     if (listFilter !== 'all') list = list.filter(qt => qt.status === listFilter);
-    switch (listSort) {
-      case 'oldest': list = [...list].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '')); break;
-      case 'name':   list = [...list].sort((a, b) => {
-        const ca = customers.find(c => c.id === a.customerId)?.name ?? '';
-        const cb = customers.find(c => c.id === b.customerId)?.name ?? '';
-        return ca.localeCompare(cb);
-      }); break;
-      case 'expiry': list = [...list].sort((a, b) => (a.validTo ?? '').localeCompare(b.validTo ?? '')); break;
-      default:       list = [...list].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')); break;
-    }
-    return list;
-  }, [quotations, listSearch, listFilter, listSort, customers]);
+    if (customerFilter) list = list.filter(qt => qt.customerId === customerFilter);
+    if (scenarioFilter) list = list.filter(qt => qt.scenario === scenarioFilter);
+    // Validity date range — quote validity window must overlap the selected range
+    if (dateRange.from) list = list.filter(qt => (qt.validTo ?? '') >= dateRange.from);
+    if (dateRange.to) list = list.filter(qt => (qt.validFrom ?? '') <= dateRange.to);
+    return [...list].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, [quotations, listSearch, listFilter, customerFilter, scenarioFilter, dateRange, customers]);
 
   const tabCounts = useMemo(() => ({
     all: quotations.length,
@@ -486,306 +487,227 @@ export default function QuotationWizard({
   // ── render helpers ────────────────────────────────────────────
   const fmtCurrency = (n: number, cur = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(n);
 
+  // ── table columns ─────────────────────────────────────────────
+  const listColumns: DataTableColumn<Quotation>[] = [
+    {
+      key: 'quoteNo', header: 'Quote No', sortValue: q => q.quoteNo,
+      render: q => <span className={T.cellId}>{q.quoteNo}</span>,
+    },
+    {
+      key: 'customer', header: 'Customer',
+      sortValue: q => customers.find(c => c.id === q.customerId)?.name ?? '',
+      render: q => {
+        const cust = customers.find(c => c.id === q.customerId);
+        return (
+          <div>
+            <span className={T.cellPrimary}>{cust?.name ?? '—'}</span>
+            {(q.taxId || cust?.taxId) && <span className={`${T.cellMuted} block font-mono`}>{q.taxId ?? cust?.taxId}</span>}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'scenario', header: 'Scenario', sortValue: q => q.scenario ?? '',
+      render: q => q.scenario
+        ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[q.scenario]}`}>{q.scenario}</span>
+        : <span className={T.cellMuted}>—</span>,
+    },
+    {
+      key: 'rates', header: 'Rate Summary',
+      render: q => {
+        const items = q.rateItems ?? q.rates ?? [];
+        const first = items[0];
+        if (!first) return <span className={T.cellMuted}>—</span>;
+        return (
+          <div>
+            <span className={T.cellSecondary}>
+              <span className="font-mono">{first.containerType ?? first.containerSize}</span>{' '}
+              <strong>{fmtCurrency(first.baseRate, first.currency ?? 'INR')}</strong>
+            </span>
+            {items.length > 1 && <span className={`${T.cellMuted} block`}>+{items.length - 1} more</span>}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'mqc', header: 'MQC',
+      render: q => {
+        if (!q.mqcVolume || !q.mqcPeriod || q.mqcPeriod === 'none') return <span className={T.cellMuted}>—</span>;
+        const mqc = getMqcConsumption(q, jobs);
+        const barColor = mqc.isOverCommitted ? 'bg-red-500' : mqc.percentUsed >= 80 ? 'bg-amber-500' : 'bg-green-500';
+        return (
+          <div className="w-24">
+            <div className="text-[10px] font-bold text-slate-600">{mqc.used}/{mqc.committed}</div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, mqc.percentUsed)}%` }} />
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'validity', header: 'Validity', sortValue: q => q.validTo ?? '',
+      render: q => {
+        const expDays = daysUntilExpiry(q.validTo ?? '');
+        const expiringSoon = q.status === 'confirmed' && expDays >= 0 && expDays <= 14;
+        const fmt = (d?: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
+        return (
+          <div>
+            <span className={T.cellMuted}>{fmt(q.validFrom)} → {fmt(q.validTo)}</span>
+            {expiringSoon && (
+              <span className="text-[10px] text-amber-600 font-bold flex items-center gap-0.5">
+                <AlertCircle className="w-2.5 h-2.5" /> Expires in {expDays}d
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'status', header: 'Status', sortValue: q => q.status,
+      render: q => <span className={badgeClass(q.status)}>{statusLabel(q.status)}</span>,
+    },
+  ];
+
+  const activeFilterCount =
+    (listSearch ? 1 : 0) + (listFilter !== 'all' ? 1 : 0) + (customerFilter ? 1 : 0) +
+    (scenarioFilter ? 1 : 0) + (dateRange.from || dateRange.to ? 1 : 0);
+
+  const closeDrawer = () => { setRightView('empty'); setSelectedQuoteId(null); setConvertingQuoteId(null); };
+
   // ═══════════════════════════════════════════════════════════════
   return (
-    <div className="flex h-[calc(100vh-110px)] bg-slate-50 overflow-hidden">
+    <div className={rightView === 'create' ? 'flex h-[calc(100vh-110px)] bg-slate-50 overflow-hidden' : 'space-y-4'}>
 
-      {/* ── LEFT PANEL ── */}
-      <div className="w-80 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 space-y-2 shrink-0">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-blue-600" /> Quotations
-            </h2>
+      {/* ── LIST VIEW (full-width table) ── */}
+      {rightView !== 'create' && (
+        <>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className={`${T.pageTitle} flex items-center gap-2`}>
+                <FileText className="w-5 h-5 text-blue-600" /> Commercial Quotations Hub
+              </h1>
+              <p className={T.pageSubtitle}>Draft, approve, and convert customer rate agreements.</p>
+            </div>
             <button
               onClick={() => openCreate()}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded transition"
+              className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition flex items-center gap-1.5 shadow-sm"
             >
-              <Plus className="w-3 h-3" /> New
+              <Plus className="w-4 h-4" /> Create Proposal
             </button>
           </div>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search quote no / customer..."
-              value={listSearch}
-              onChange={e => setListSearch(e.target.value)}
-              className="w-full pl-7 pr-3 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded focus:outline-none"
+
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+            <FilterBar
+              searchPlaceholder="Search quote no or customer…"
+              searchValue={listSearch}
+              onSearchChange={setListSearch}
+              statusOptions={[
+                { value: 'all', label: 'All', count: tabCounts.all },
+                { value: 'draft', label: 'Draft', count: tabCounts.draft },
+                { value: 'pending_approval', label: 'Pending', count: tabCounts.pending_approval },
+                { value: 'confirmed', label: 'Confirmed', count: tabCounts.confirmed },
+                { value: 'expired', label: 'Expired', count: tabCounts.expired },
+                { value: 'superseded', label: 'Superseded', count: tabCounts.superseded },
+              ]}
+              activeStatus={listFilter}
+              onStatusChange={v => setListFilter(v as typeof listFilter)}
+              dropdownFilters={[
+                {
+                  key: 'customer', label: 'Customer',
+                  options: customers.map(c => ({ value: c.id, label: c.name })),
+                  value: customerFilter, onChange: setCustomerFilter,
+                },
+                {
+                  key: 'scenario', label: 'Scenario',
+                  options: ['IMP', 'EXP', 'Inland', 'EMTY', 'RETURN'].map(s => ({ value: s, label: s })),
+                  value: scenarioFilter, onChange: setScenarioFilter,
+                },
+              ]}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              dateRangeLabel="Valid"
+              onClearAll={() => {
+                setListSearch(''); setListFilter('all'); setCustomerFilter('');
+                setScenarioFilter(''); setDateRange({ from: '', to: '' });
+              }}
+              activeFilterCount={activeFilterCount}
             />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <select
-              value={listSort}
-              onChange={e => setListSort(e.target.value as typeof listSort)}
-              className="flex-1 text-[10px] border border-slate-200 rounded px-2 py-1 focus:outline-none bg-white"
-            >
-              <option value="newest">Newest First</option>
-              <option value="oldest">Oldest First</option>
-              <option value="name">Customer A–Z</option>
-              <option value="expiry">Expiry Soon</option>
-            </select>
-          </div>
-          {/* Filter tabs */}
-          <div className="flex gap-0.5 flex-wrap">
-            {(['all', 'draft', 'pending_approval', 'confirmed', 'expired', 'superseded'] as const).map(f => {
-              const labels: Record<string, string> = { all: 'All', draft: 'Draft', pending_approval: 'Pending', confirmed: 'Live', expired: 'Expired', superseded: 'Old' };
-              const count = tabCounts[f];
-              return (
-                <button
-                  key={f}
-                  onClick={() => setListFilter(f)}
-                  className={`text-[9px] font-bold px-2 py-1 rounded transition flex items-center gap-1 ${listFilter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                >
-                  {labels[f]}
-                  <span className={`text-[8px] px-1 py-0.5 rounded-full ${listFilter === f ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Quote cards */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-          {filteredList.length === 0 ? (
-            <div className="text-center py-10 text-xs text-slate-400 italic">No quotations found.</div>
-          ) : filteredList.map(q => {
-            const cust = customers.find(c => c.id === q.customerId);
-            const expDays = daysUntilExpiry(q.validTo ?? '');
-            const expiringSoon = q.status === 'confirmed' && expDays >= 0 && expDays <= 14;
-            const isSelected = selectedQuoteId === q.id && rightView === 'detail';
-            const firstItem = (q.rateItems ?? [])[0];
-
-            // ── surcharge pills (card-level OR from first rate item) ──
-            const cardSurcharges = q.applicableSurcharges?.length
-              ? q.applicableSurcharges
-              : (q.rateItems?.[0]?.applicableSurcharges ?? []).map(s => ({
-                  code: s.surchargeCode,
-                  label: s.surchargeName,
-                  value: s.calculationMethod.toLowerCase().includes('percentage')
-                    ? `${s.amount}%`
-                    : fmtCurrency(s.amount, firstItem?.currency ?? 'INR'),
-                  category: (['FAF', 'FUEL'].includes(s.surchargeCode.toUpperCase()) ? 'fuel'
-                    : ['DET', 'DETENTION'].includes(s.surchargeCode.toUpperCase()) ? 'detention'
-                    : s.surchargeCode.toUpperCase().includes('PORT') ? 'port'
-                    : s.surchargeCode.toUpperCase().includes('WASH') ? 'wash'
-                    : 'other') as 'fuel' | 'detention' | 'port' | 'wash' | 'other',
-                  isNew: false,
-                }));
-            const surchargeColors: Record<string, string> = {
-              fuel: 'bg-amber-50 text-amber-700 border-amber-200',
-              detention: 'bg-red-50 text-red-700 border-red-200',
-              port: 'bg-blue-50 text-blue-700 border-blue-200',
-              wash: 'bg-purple-50 text-purple-700 border-purple-200',
-              other: 'bg-slate-50 text-slate-600 border-slate-200',
-            };
-            const visibleSurcharges = cardSurcharges.slice(0, 3);
-            const extraSurcharges = cardSurcharges.length - visibleSurcharges.length;
-            const allRateItems = q.rateItems ?? q.rates ?? [];
-            const paymentTerms = q.paymentTermsOverride || cust?.paymentTerms;
-            const freightLabel = q.freightResponsibility
-              ? q.freightResponsibility.toUpperCase().includes('CONSIGNEE') ? 'CONSIGNEE PAYS'
-                : q.freightResponsibility.toUpperCase().includes('SHIPPER') ? 'SHIPPER PAYS'
-                : 'THIRD PARTY'
-              : null;
-
-            return (
-              <motion.div
-                key={q.id}
-                whileHover={{ scale: 1.005 }}
-                onClick={() => { setSelectedQuoteId(q.id); setRightView('detail'); setConvertingQuoteId(null); }}
-                className={`p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-              >
-                {/* Row 1: quote no + status badge */}
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-[11px] font-bold text-blue-700">{q.quoteNo}</span>
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${STATUS_BADGE[q.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                    {q.status === 'confirmed' ? '✓ CONFIRMED' : q.status === 'draft' ? 'DRAFT' : q.status === 'pending_approval' ? 'PENDING' : q.status.toUpperCase()}
-                  </span>
-                </div>
-
-                {/* Row 2: customer name */}
-                <div className="text-xs font-bold text-slate-800 truncate mt-0.5">{cust?.name ?? '—'}</div>
-
-                {/* Row 3: customer taxId */}
-                {(q.taxId || cust?.taxId) && (
-                  <div className="text-[9px] text-slate-400 font-mono mt-0.5">Tax ID: {q.taxId ?? cust?.taxId}</div>
-                )}
-
-                {/* Row 4: incoterm + freight responsibility pills */}
-                {(q.incoterm || freightLabel) && (
-                  <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                    {q.incoterm && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-blue-200 text-blue-600 bg-blue-50">{q.incoterm}</span>
-                    )}
-                    {freightLabel && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 bg-slate-50">{freightLabel}</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Row 5: payment terms */}
-                {paymentTerms && (
-                  <div className="text-[9px] text-slate-400 mt-1">Terms: {paymentTerms}</div>
-                )}
-
-                {/* Row 6: rate items (max 2, +N more) */}
-                <div className="mt-1.5 space-y-0.5">
-                  {allRateItems.slice(0, 2).map((ri, i) => (
-                    <div key={ri.id ?? i} className="flex items-center gap-1.5 flex-wrap">
-                      {q.scenario && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[q.scenario]}`}>{q.scenario}</span>}
-                      <span className="text-[9px] text-slate-500 font-mono">{ri.containerType ?? ri.containerSize}</span>
-                      <span className="text-[9px] font-bold text-slate-700">{fmtCurrency(ri.baseRate, ri.currency ?? 'INR')}</span>
-                      {(ri.returnLegRate ?? 0) > 0 && (
-                        <span className="text-[9px] text-slate-400 flex items-center gap-0.5">
-                          <RotateCcw className="w-2.5 h-2.5" /> {fmtCurrency(ri.returnLegRate!, ri.currency ?? 'INR')}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {allRateItems.length > 2 && (
-                    <div className="text-[9px] text-slate-400 italic">+{allRateItems.length - 2} more rate items</div>
-                  )}
-                </div>
-
-                {/* Row 7: surcharge pills */}
-                {visibleSurcharges.length > 0 && (
-                  <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                    {visibleSurcharges.map(s => (
-                      <span key={s.code} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${surchargeColors[s.category ?? 'other']}`}>
-                        {s.code}: {s.value}
-                        {s.isNew && <span className="ml-0.5 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded">NEW</span>}
-                      </span>
-                    ))}
-                    {extraSurcharges > 0 && (
-                      <span className="text-[9px] text-slate-400 font-bold">+{extraSurcharges}</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Row 8: demurrage / detention */}
-                {(q.demurrageFreeDays || q.detentionFreeDays) && (
-                  <div className="mt-1.5 space-y-0.5">
-                    {q.demurrageFreeDays && (
-                      <div className="text-[9px] text-amber-600 flex items-center gap-1">
-                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                        Demurrage: {q.demurrageFreeDays}d Free{q.demurrageFlatRate ? ` (${fmtCurrency(q.demurrageFlatRate)}/d)` : ''}
-                      </div>
-                    )}
-                    {q.detentionFreeDays && (
-                      <div className="text-[9px] text-amber-600 flex items-center gap-1">
-                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                        Detention: {q.detentionFreeDays}d Free{q.detentionFlatRate ? ` (${fmtCurrency(q.detentionFlatRate)}/d)` : ''}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Row 9: MQC strip */}
-                {q.mqcVolume && q.mqcPeriod && q.mqcPeriod !== 'none' && (() => {
-                  const mqc = getMqcConsumption(q, jobs);
-                  const barColor = mqc.isOverCommitted ? 'bg-red-500' : mqc.percentUsed >= 80 ? 'bg-amber-500' : 'bg-green-500';
-                  const textColor = mqc.isOverCommitted ? 'text-red-700' : mqc.percentUsed >= 80 ? 'text-amber-700' : 'text-green-700';
-                  return (
-                    <div className="mt-1.5 space-y-0.5">
-                      <div className={`text-[9px] font-bold flex items-center gap-1 ${textColor}`}>
-                        📦 {mqc.used}/{mqc.committed} containers — {mqc.periodLabel}
-                      </div>
-                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100, mqc.percentUsed)}%` }} />
-                      </div>
-                      <div className="text-[8px] text-slate-400">{mqc.percentUsed}% used</div>
-                    </div>
-                  );
-                })()}
-
-                {/* Row 10: validity dates */}
-                <div className="text-[9px] text-slate-400 mt-1.5 font-mono">
-                  {q.validFrom} → {q.validTo}
-                </div>
-
-                {/* Row 10: expiry warning */}
-                {expiringSoon && (
-                  <div className="mt-1 text-[9px] text-amber-600 font-bold flex items-center gap-0.5">
-                    <AlertCircle className="w-2.5 h-2.5" /> Expires in {expDays}d
-                  </div>
-                )}
-                {q.clonedFromId && (
-                  <div className="mt-0.5 text-[9px] text-slate-400 italic">Cloned quote</div>
-                )}
-
-                {/* Row 11: action icons — stop propagation so clicks don't open detail twice */}
-                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-100" onClick={e => e.stopPropagation()}>
-                  <button
-                    title="View detail"
-                    onClick={() => { setSelectedQuoteId(q.id); setRightView('detail'); setConvertingQuoteId(null); }}
-                    className="flex items-center gap-0.5 text-[9px] font-bold text-slate-500 hover:text-blue-600 px-1.5 py-1 rounded hover:bg-blue-50 transition"
-                  >
-                    <Eye className="w-3 h-3" /> View
-                  </button>
+            <DataTable
+              columns={listColumns}
+              rows={filteredList}
+              onRowClick={q => { setSelectedQuoteId(q.id); setRightView('detail'); setConvertingQuoteId(null); }}
+              rowActions={q => (
+                <>
                   <button
                     title="Clone"
                     onClick={() => openCreate(q)}
-                    className="flex items-center gap-0.5 text-[9px] font-bold text-slate-500 hover:text-slate-700 px-1.5 py-1 rounded hover:bg-slate-100 transition"
+                    className="h-7 w-7 flex items-center justify-center rounded text-slate-500 hover:text-slate-700 hover:bg-slate-100"
                   >
-                    <Copy className="w-3 h-3" /> Clone
+                    <Copy className="w-3.5 h-3.5" />
                   </button>
                   {q.status === 'confirmed' && (
                     <button
                       title="Convert to Booking"
                       onClick={() => { setSelectedQuoteId(q.id); setConvertingQuoteId(q.id); setRightView('detail'); }}
-                      className="flex items-center gap-0.5 text-[9px] font-bold text-blue-600 hover:text-blue-800 px-1.5 py-1 rounded hover:bg-blue-50 transition ml-auto"
+                      className="h-7 w-7 flex items-center justify-center rounded text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                     >
-                      <ClipboardList className="w-3 h-3" /> Booking
+                      <ClipboardList className="w-3.5 h-3.5" />
                     </button>
                   )}
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── RIGHT PANEL ── */}
-      <div className="flex-1 overflow-hidden flex flex-col relative">
-
-        {/* ── EMPTY STATE ── */}
-        {rightView === 'empty' && (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <FileText className="w-12 h-12 text-slate-200 mb-4" />
-            <h3 className="text-sm font-bold text-slate-700">Select a quotation</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              Choose a quote from the list, or create a new one to get started.
-            </p>
-            <button
-              onClick={() => openCreate()}
-              className="mt-4 flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded transition"
-            >
-              <Plus className="w-3.5 h-3.5" /> New Quotation
-            </button>
+                </>
+              )}
+              emptyState={{
+                icon: <FileText className="w-10 h-10" />,
+                title: 'No quotations found',
+                subtitle: 'Adjust the filters or create a new proposal.',
+              }}
+            />
           </div>
-        )}
+        </>
+      )}
 
-        {/* ── DETAIL VIEW ── */}
-        {rightView === 'detail' && selectedQuote && !convertingQuoteId && (
-          <div className="flex-1 overflow-y-auto">
-            {/* Detail header */}
-            <div className="px-6 py-4 border-b border-slate-200 bg-white flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="font-mono text-xl font-black text-slate-900">{selectedQuote.quoteNo}</span>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded border ${STATUS_BADGE[selectedQuote.status]}`}>
-                    {selectedQuote.status.replace('_', ' ').toUpperCase()}
-                  </span>
-                  {selectedQuote.clonedFromId && (
-                    <span className="text-[10px] text-slate-400 italic bg-slate-100 px-2 py-0.5 rounded">
-                      Cloned from {quotations.find(q => q.id === selectedQuote.clonedFromId)?.quoteNo ?? selectedQuote.clonedFromId}
-                    </span>
-                  )}
-                </div>
-                <div className="text-base font-bold text-slate-800">{customers.find(c => c.id === selectedQuote.customerId)?.name}</div>
-              </div>
-              <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+      {/* ── DETAIL / CONVERT DRAWER ── */}
+      {rightView !== 'create' && (
+        <DetailDrawer
+          open={rightView === 'detail' && !!selectedQuote}
+          onClose={closeDrawer}
+          width="640px"
+          title={
+            convertingQuote ? (
+              <span>Convert to Booking</span>
+            ) : (
+              <>
+                <span className="font-mono">{selectedQuote?.quoteNo}</span>
+                {selectedQuote && <span className={badgeClass(selectedQuote.status)}>{statusLabel(selectedQuote.status)}</span>}
+              </>
+            )
+          }
+          subtitle={
+            convertingQuote
+              ? `Converting ${convertingQuote.quoteNo}`
+              : selectedQuote
+                ? `${customers.find(c => c.id === selectedQuote.customerId)?.name ?? ''}${selectedQuote.clonedFromId ? ` · cloned from ${quotations.find(q => q.id === selectedQuote.clonedFromId)?.quoteNo ?? ''}` : ''}`
+                : undefined
+          }
+          footer={
+            convertingQuote ? (
+              <>
+                <button onClick={() => setConvertingQuoteId(null)} className="btn-secondary">Cancel</button>
+                <button
+                  onClick={() => {
+                    const ri = (convertingQuote.rateItems ?? [])[0];
+                    onConvertToBooking(convertingQuote.customerId, convertingQuote.id, ri?.id);
+                    setConvertingQuoteId(null);
+                    showToast('Navigating to Booking — quotation pre-filled ✓');
+                  }}
+                  className="btn-primary flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Proceed to Booking Form →
+                </button>
+              </>
+            ) : selectedQuote ? (
+              <>
                 {selectedQuote.status === 'draft' && (
                   <>
                     <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Edit</button>
@@ -804,25 +726,57 @@ export default function QuotationWizard({
                 {selectedQuote.status === 'confirmed' && (
                   <>
                     <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><Copy className="w-3 h-3" /> Clone</button>
-                    <button onClick={() => setConvertingQuoteId(selectedQuote.id)} className="btn-primary flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Convert to Booking</button>
                     <button onClick={() => handleExpire(selectedQuote)} className="btn-danger flex items-center gap-1"><Clock className="w-3 h-3" /> Expire</button>
+                    <button onClick={() => setConvertingQuoteId(selectedQuote.id)} className="btn-primary flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Convert to Booking</button>
                   </>
                 )}
                 {selectedQuote.status === 'expired' && (
                   <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><Copy className="w-3 h-3" /> Clone</button>
                 )}
+              </>
+            ) : undefined
+          }
+        >
+          {/* ── CONVERT TO BOOKING CONTENT ── */}
+          {convertingQuote && (
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Pre-filled from Quotation (locked)</div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><span className="text-slate-400">Customer:</span> <span className="font-bold text-slate-800">{customers.find(c => c.id === convertingQuote.customerId)?.name}</span></div>
+                  <div><span className="text-slate-400">Scenario:</span> <span className={`font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[convertingQuote.scenario ?? 'IMP']}`}>{convertingQuote.scenario}</span></div>
+                  {(convertingQuote.rateItems ?? [])[0] && <>
+                    <div><span className="text-slate-400">Container Type:</span> <span className="font-mono font-bold text-slate-700">{(convertingQuote.rateItems ?? [])[0].containerType}</span></div>
+                    <div><span className="text-slate-400">Base Rate:</span> <span className="font-bold text-blue-700">{fmtCurrency((convertingQuote.rateItems ?? [])[0].baseRate, (convertingQuote.rateItems ?? [])[0].currency)}</span></div>
+                  </>}
+                </div>
+              </div>
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                <div className="text-[10px] font-bold uppercase text-blue-500 tracking-wider flex items-center gap-1.5">
+                  <Info className="w-3 h-3" /> Still required in Booking Form
+                </div>
+                <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                  {['Container No & Seal No', 'Shipping Line & Vessel', 'Voyage No & ETA', 'Origin & Destination Locations', 'Target Delivery Date'].map(item => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
               </div>
             </div>
+          )}
 
+          {/* ── DETAIL CONTENT (read-only) ── */}
+          {!convertingQuote && selectedQuote && (
+          <div>
             {/* Info strip */}
-            <div className="px-6 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-4 flex-wrap text-xs">
+            <div className="-mx-5 -mt-4 mb-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-4 flex-wrap text-xs">
               {selectedQuote.scenario && <span className={`font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[selectedQuote.scenario]}`}>{selectedQuote.scenario}</span>}
               <span className="text-slate-500">Region: <strong>{selectedQuote.regionId}</strong></span>
               <span className="text-slate-500">Currency: <strong>{selectedQuote.currency}</strong></span>
               {selectedQuote.confirmedBy && <span className="text-green-600">Confirmed by {selectedQuote.confirmedBy}</span>}
             </div>
 
-            <div className="p-6 space-y-5">
+            <div className="space-y-5">
+
 
               {/* ── VALIDITY SECTION ── */}
               {(() => {
@@ -1083,67 +1037,9 @@ export default function QuotationWizard({
               </div>
             </div>
           </div>
-        )}
-
-        {/* ── CONVERT TO BOOKING PANEL ── */}
-        <AnimatePresence>
-          {convertingQuote && (
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-              className="absolute inset-0 bg-white z-20 flex flex-col"
-            >
-              <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Convert to Booking</h3>
-                  <p className="text-xs text-slate-500">Converting <span className="font-mono font-bold text-blue-600">{convertingQuote.quoteNo}</span></p>
-                </div>
-                <button onClick={() => setConvertingQuoteId(null)} className="p-1.5 hover:bg-slate-100 rounded">
-                  <X className="w-4 h-4 text-slate-400" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Pre-filled from Quotation (locked)</div>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div><span className="text-slate-400">Customer:</span> <span className="font-bold text-slate-800">{customers.find(c => c.id === convertingQuote.customerId)?.name}</span></div>
-                    <div><span className="text-slate-400">Scenario:</span> <span className={`font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[convertingQuote.scenario ?? 'IMP']}`}>{convertingQuote.scenario}</span></div>
-                    {(convertingQuote.rateItems ?? [])[0] && <>
-                      <div><span className="text-slate-400">Container Type:</span> <span className="font-mono font-bold text-slate-700">{(convertingQuote.rateItems ?? [])[0].containerType}</span></div>
-                      <div><span className="text-slate-400">Base Rate:</span> <span className="font-bold text-blue-700">{fmtCurrency((convertingQuote.rateItems ?? [])[0].baseRate, (convertingQuote.rateItems ?? [])[0].currency)}</span></div>
-                    </>}
-                  </div>
-                </div>
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-                  <div className="text-[10px] font-bold uppercase text-blue-500 tracking-wider flex items-center gap-1.5">
-                    <Info className="w-3 h-3" /> Still required in Booking Form
-                  </div>
-                  <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
-                    {['Container No & Seal No', 'Shipping Line & Vessel', 'Voyage No & ETA', 'Origin & Destination Locations', 'Target Delivery Date'].map(item => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
-                <button onClick={() => setConvertingQuoteId(null)} className="btn-secondary">Cancel</button>
-                <button
-                  onClick={() => {
-                    const ri = (convertingQuote.rateItems ?? [])[0];
-                    onConvertToBooking(convertingQuote.customerId, convertingQuote.id, ri?.id);
-                    setConvertingQuoteId(null);
-                    showToast('Navigating to Booking — quotation pre-filled ✓');
-                  }}
-                  className="btn-primary flex items-center gap-1.5"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Proceed to Booking Form →
-                </button>
-              </div>
-            </motion.div>
           )}
-        </AnimatePresence>
+        </DetailDrawer>
+      )}
 
         {/* ── CREATE WIZARD ── */}
         {rightView === 'create' && (
@@ -1810,7 +1706,6 @@ export default function QuotationWizard({
             </div>
           </div>
         )}
-      </div>
 
       {/* Toast */}
       <AnimatePresence>

@@ -17,6 +17,10 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createMilestonesForScenario } from '../data';
+import DataTable, { DataTableColumn } from './shared/DataTable';
+import FilterBar from './shared/FilterBar';
+import DetailDrawer from './shared/DetailDrawer';
+import { T, badgeClass, statusLabel } from './shared/ui';
 
 interface JobBookerProps {
   jobs: Job[];
@@ -78,6 +82,9 @@ export default function JobBooker({
   const [detailTab, setDetailTab] = useState<DetailTab>('overview');
   const [listTab, setListTab] = useState<ListTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [customerFilter, setCustomerFilter] = useState('');
+  const [scenarioFilter, setScenarioFilter] = useState('');
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Create form state
   const [createStep, setCreateStep] = useState<CreateStep>(1);
@@ -155,8 +162,12 @@ export default function JobBooker({
           j.scenario.toLowerCase().includes(q);
       });
     }
+    if (customerFilter) list = list.filter(j => j.customerId === customerFilter);
+    if (scenarioFilter) list = list.filter(j => j.scenario === scenarioFilter);
+    if (dateRange.from) list = list.filter(j => (j.targetDeliveryDate ?? '') >= dateRange.from);
+    if (dateRange.to) list = list.filter(j => !!j.targetDeliveryDate && j.targetDeliveryDate <= dateRange.to);
     return list;
-  }, [jobs, listTab, searchQuery, customers]);
+  }, [jobs, listTab, searchQuery, customers, customerFilter, scenarioFilter, dateRange]);
 
   const resetCreateForm = () => {
     setSelectedCustomerId(''); setSelectedQuoteId(''); setSelectedRateItemId('');
@@ -280,87 +291,61 @@ export default function JobBooker({
     </div>
   );
 
-  // ── Left Panel: Booking List ─────────────────────────────────────
-  const LeftPanel = () => (
-    <div className="w-80 shrink-0 flex flex-col border-r border-slate-200 bg-white h-full min-h-0">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-blue-600" /> Bookings
-          </h2>
-          <button
-            onClick={() => { resetCreateForm(); setPanelView('create'); }}
-            className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded transition"
-          >
-            <FilePlus className="w-3 h-3" /> New
-          </button>
+  // ── Table columns ────────────────────────────────────────────────
+  const listColumns: DataTableColumn<Job>[] = [
+    {
+      key: 'jobNo', header: 'Job No', sortValue: j => j.jobNo,
+      render: j => <span className={T.cellId}>{j.jobNo}</span>,
+    },
+    {
+      key: 'customer', header: 'Customer', sortValue: j => cust(j.customerId)?.name ?? '',
+      render: j => <span className={T.cellPrimary}>{cust(j.customerId)?.name ?? '—'}</span>,
+    },
+    {
+      key: 'scenario', header: 'Scenario', sortValue: j => j.scenario,
+      render: j => <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[j.scenario]}`}>{j.scenario}</span>,
+    },
+    {
+      key: 'container', header: 'Container', sortValue: j => j.containerNo,
+      render: j => (
+        <div>
+          <span className={T.cellId}>{j.containerNo}</span>
+          <span className={`${T.cellMuted} block`}>{j.containerSize}</span>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search jobs, containers..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-3 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded focus:outline-none focus:border-blue-400"
-          />
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-slate-100 px-2 pt-2">
-        {(['all', 'pending', 'active', 'completed'] as ListTab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setListTab(t)}
-            className={`px-2.5 py-1 text-[10px] font-bold capitalize rounded-t transition ${
-              listTab === t ? 'text-blue-700 border-b-2 border-blue-600 bg-white' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {/* Job cards */}
-      <div className="overflow-y-auto flex-1">
-        {filteredJobs.length === 0 ? (
-          <div className="text-center py-8 text-xs text-slate-400 italic px-4">
-            No bookings found. Click "New" to create one.
+      ),
+    },
+    {
+      key: 'driver', header: 'Driver', sortValue: j => j.driverId ?? '',
+      render: j => j.driverId
+        ? <span className={badgeClass('assigned')}>Assigned</span>
+        : <span className={badgeClass('unassigned')}>Unassigned</span>,
+    },
+    {
+      key: 'milestone', header: 'Milestones',
+      sortValue: j => j.milestones.filter(m => m.completed).length / (j.milestones.length || 1),
+      render: j => {
+        const done = j.milestones.filter(m => m.completed).length;
+        const total = j.milestones.length || 1;
+        const pct = Math.round((done / total) * 100);
+        return (
+          <div className="w-24">
+            <div className="text-[10px] font-bold text-slate-600">{done}/{total}</div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${pct === 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+            </div>
           </div>
-        ) : (
-          filteredJobs.map(job => {
-            const customer = cust(job.customerId);
-            const isSelected = selectedJobId === job.id && panelView === 'detail';
-            return (
-              <button
-                key={job.id}
-                onClick={() => { setSelectedJobId(job.id); setPanelView('detail'); setDetailTab('overview'); }}
-                className={`w-full text-left px-4 py-3 border-b border-slate-50 transition-colors ${
-                  isSelected ? 'bg-blue-50 border-l-2 border-l-blue-500' : 'hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-mono text-[10px] font-bold text-blue-700">{job.jobNo}</span>
-                  <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${STATUS_COLOR[job.status]}`}>
-                    {job.status}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[job.scenario]}`}>
-                    {job.scenario}
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-700 truncate">{customer?.name}</span>
-                </div>
-                <div className="text-[10px] font-mono text-slate-400 truncate">{job.containerNo}</div>
-              </button>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
+        );
+      },
+    },
+    {
+      key: 'status', header: 'Status', sortValue: j => j.status,
+      render: j => <span className={badgeClass(j.status)}>{statusLabel(j.status)}</span>,
+    },
+  ];
+
+  const activeFilterCount =
+    (searchQuery ? 1 : 0) + (listTab !== 'all' ? 1 : 0) + (customerFilter ? 1 : 0) +
+    (scenarioFilter ? 1 : 0) + (dateRange.from || dateRange.to ? 1 : 0);
 
   // ── Right Panel: Create Form ─────────────────────────────────────
   const CreatePanel = () => (
@@ -735,29 +720,10 @@ export default function JobBooker({
     ];
 
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* Detail header */}
-        <div className="px-6 py-4 border-b border-slate-200 bg-white">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-mono text-sm font-bold text-blue-700">{job.jobNo}</span>
-                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${STATUS_COLOR[job.status]}`}>
-                  {job.status}
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[job.scenario]}`}>
-                  {job.scenario}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">{customer?.name} · {origin?.code} → {dest?.code}</p>
-            </div>
-            <button onClick={() => setPanelView('list')} className="p-1.5 rounded hover:bg-slate-100 text-slate-400 transition">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Sub-tabs */}
-          <div className="flex gap-1 mt-3 overflow-x-auto">
+      <div className="flex flex-col min-h-0">
+        {/* Sub-tabs */}
+        <div className="-mx-5 -mt-4 mb-4 px-5 py-2.5 bg-white border-b border-slate-200">
+          <div className="flex gap-1 overflow-x-auto">
             {DETAIL_TABS.map(tab => (
               <button
                 key={tab.id}
@@ -775,7 +741,7 @@ export default function JobBooker({
         </div>
 
         {/* Detail content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div>
           <AnimatePresence mode="wait">
             {detailTab === 'overview' && (
               <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
@@ -954,40 +920,99 @@ export default function JobBooker({
   };
 
   return (
-    <div className="flex flex-col h-full" id="jobs-booking-and-documenting">
+    <div className="space-y-4" id="jobs-booking-and-documenting">
       {/* Page header */}
-      <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-0">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold font-sans tracking-tight text-slate-900 flex items-center gap-2">
+          <h1 className={`${T.pageTitle} flex items-center gap-2`}>
             <Layers className="text-blue-600 w-5 h-5" /> Operations Booking &amp; Gate Authority
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className={T.pageSubtitle}>
             Convert confirmed quotations into container movement orders. Manage ROTs, CNs and milestone tracking.
           </p>
         </div>
+        {panelView !== 'create' && (
+          <button
+            onClick={() => { resetCreateForm(); setPanelView('create'); }}
+            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition flex items-center gap-1.5 shadow-sm"
+          >
+            <FilePlus className="w-4 h-4" /> New Booking
+          </button>
+        )}
       </div>
 
-      {/* Two-panel layout */}
-      <div className="flex flex-1 border border-slate-200 rounded-lg overflow-hidden bg-white mt-4" style={{ minHeight: '620px' }}>
-        <LeftPanel />
-        <AnimatePresence mode="wait">
-          {panelView === 'create' ? (
-            <motion.div key="create" className="flex-1 overflow-hidden" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
-              <CreatePanel />
-            </motion.div>
-          ) : panelView === 'detail' && selectedJob ? (
-            <motion.div key={`detail-${selectedJobId}`} className="flex-1 overflow-hidden flex flex-col" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
-              <DetailPanel />
-            </motion.div>
-          ) : (
-            <motion.div key="empty" className="flex-1 flex flex-col items-center justify-center text-slate-400" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Layers className="w-10 h-10 mb-3 opacity-30" />
-              <p className="text-sm font-medium">Select a booking to view details</p>
-              <p className="text-xs mt-1">or click <strong>New</strong> to create a booking</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {panelView === 'create' ? (
+        /* Full-page 3-step create wizard (preserved) */
+        <div className="bg-white border border-slate-200 rounded-lg shadow-sm" style={{ minHeight: '620px' }}>
+          <CreatePanel />
+        </div>
+      ) : (
+        <>
+          {/* Full-width table */}
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+            <FilterBar
+              searchPlaceholder="Search jobs, containers, customers…"
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              statusOptions={[
+                { value: 'all', label: 'All', count: jobs.length },
+                { value: 'pending', label: 'Pending', count: jobs.filter(j => ['pending', 'scheduled'].includes(j.status)).length },
+                { value: 'active', label: 'Active', count: jobs.filter(j => ['active', 'dispatched'].includes(j.status)).length },
+                { value: 'completed', label: 'Completed', count: jobs.filter(j => ['completed', 'exception'].includes(j.status)).length },
+              ]}
+              activeStatus={listTab}
+              onStatusChange={v => setListTab(v as ListTab)}
+              dropdownFilters={[
+                {
+                  key: 'customer', label: 'Customer',
+                  options: customers.map(c => ({ value: c.id, label: c.name })),
+                  value: customerFilter, onChange: setCustomerFilter,
+                },
+                {
+                  key: 'scenario', label: 'Scenario',
+                  options: ['IMP', 'EXP', 'Inland', 'EMTY', 'RETURN'].map(s => ({ value: s, label: s })),
+                  value: scenarioFilter, onChange: setScenarioFilter,
+                },
+              ]}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              dateRangeLabel="Delivery"
+              onClearAll={() => {
+                setSearchQuery(''); setListTab('all'); setCustomerFilter('');
+                setScenarioFilter(''); setDateRange({ from: '', to: '' });
+              }}
+              activeFilterCount={activeFilterCount}
+            />
+            <DataTable
+              columns={listColumns}
+              rows={filteredJobs}
+              onRowClick={job => { setSelectedJobId(job.id); setPanelView('detail'); setDetailTab('overview'); }}
+              emptyState={{
+                icon: <Layers className="w-10 h-10" />,
+                title: 'No bookings found',
+                subtitle: 'Adjust the filters or create a new booking.',
+              }}
+            />
+          </div>
+
+          {/* Detail drawer with 6 tabs */}
+          <DetailDrawer
+            open={panelView === 'detail' && !!selectedJob}
+            onClose={() => { setPanelView('list'); setSelectedJobId(null); }}
+            width="560px"
+            title={
+              <>
+                <span className="font-mono">{selectedJob?.jobNo}</span>
+                {selectedJob && <span className={badgeClass(selectedJob.status)}>{statusLabel(selectedJob.status)}</span>}
+                {selectedJob && <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[selectedJob.scenario]}`}>{selectedJob.scenario}</span>}
+              </>
+            }
+            subtitle={selectedJob ? `${cust(selectedJob.customerId)?.name ?? ''} · ${loc(selectedJob.originLocationId)?.code ?? '?'} → ${loc(selectedJob.destinationLocationId)?.code ?? '?'}` : undefined}
+          >
+            <DetailPanel />
+          </DetailDrawer>
+        </>
+      )}
     </div>
   );
 }
