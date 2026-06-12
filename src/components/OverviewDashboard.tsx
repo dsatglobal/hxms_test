@@ -223,9 +223,11 @@ export default function OverviewDashboard({
       v => v.status === "idle" || !v.status
     ).length;
 
-    // Detention Risk (containers near free time expiry <= 3 days)
+    // Detention Risk (containers near free time expiry <= 3 days, not yet returned)
     const detentionRisk = filteredJobs.filter(j => {
-      if (!j.freeTimeExpiry || j.status === 'completed') return false;
+      if (!j.freeTimeExpiry) return false;
+      if (j.gateInTimestamp) return false; // already returned
+      if (j.status === 'completed') return false;
       const expiry = new Date(j.freeTimeExpiry);
       return expiry <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     }).length;

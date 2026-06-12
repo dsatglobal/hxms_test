@@ -119,7 +119,7 @@ export default function BillingInvoiceConsole({
     return jobs.filter(j => 
       j.status === 'completed' && 
       !invoicedJobIds.has(j.id) && 
-      (!j.billingStatus || j.billingStatus === 'pending')
+      (!j.billingStatus || j.billingStatus === 'unbilled')
     );
   }, [jobs, invoices]);
 
@@ -179,7 +179,7 @@ export default function BillingInvoiceConsole({
     // Calculate base rate from quotation
     let baseRate = job.scenario === 'IMP' ? 520 : job.scenario === 'EXP' ? 400 : 300;
     const quoteObj = quotations.find(q => q.id === job.quotationId);
-    const rateLine = quoteObj?.rates.find(r => r.id === job.rateItemId);
+    const rateLine = (quoteObj?.rates ?? quoteObj?.rateItems ?? []).find(r => r.id === job.rateItemId);
     if (rateLine) {
       baseRate = rateLine.baseRate;
     }
@@ -191,8 +191,8 @@ export default function BillingInvoiceConsole({
     // Extra incidentals
     job.extraSurchargesIncurred.forEach(es => {
       surchargesLines.push({
-        code: es.code || 'INCIDENTAL',
-        description: `Incidental: ${es.name} (${es.reason || 'Surcharge'})`,
+        code: es.surchargeCode || 'INCIDENTAL',
+        description: `Incidental: ${es.description}`,
         amount: es.amount,
         billToCustomer: true
       });
@@ -206,7 +206,7 @@ export default function BillingInvoiceConsole({
     ];
     job.extraSurchargesIncurred.forEach(es => {
       subcontractorsCosts.push({
-        description: `Subcontractor surcharge coverage (${es.name})`,
+        description: `Subcontractor surcharge coverage (${es.description})`,
         amount: Math.round(es.amount * 0.7)
       });
     });

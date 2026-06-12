@@ -560,7 +560,7 @@ export default function LocationZoneMaster({
                     <LanguageSwitcher
                       supportedLanguages={supportedLanguages}
                       activeLanguageCode={locActiveLanguageCode}
-                      onLanguageChange={setLocActiveLanguageCode}
+                      onChange={setLocActiveLanguageCode}
                     />
                   </div>
                   {locSaveMessage && (
@@ -737,7 +737,7 @@ export default function LocationZoneMaster({
                     <LanguageSwitcher
                       supportedLanguages={supportedLanguages}
                       activeLanguageCode={zoneActiveLanguageCode}
-                      onLanguageChange={setZoneActiveLanguageCode}
+                      onChange={setZoneActiveLanguageCode}
                     />
                   </div>
                   {zoneSaveMessage && (

@@ -986,8 +986,6 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
             <TranslationManager
               translations={translations}
               languages={supportedLanguages}
-              onUpdateLanguage={onUpdateLanguage}
-              onAddTranslation={onAddTranslation}
               onUpdateTranslation={onUpdateTranslation}
             />
           </div>

@@ -649,7 +649,8 @@ export const INITIAL_JOBS: Job[] = [
     extraSurchargesIncurred: [],
     gateOutTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     freeTimeDays: 7,
-    freeTimeExpiry: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+    freeTimeExpiry: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    createdAt: '2026-05-20T08:00:00.000Z'
   },
   {
     id: 'job-2',
@@ -683,7 +684,8 @@ export const INITIAL_JOBS: Job[] = [
     freeTimeDays: 7,
     freeTimeExpiry: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
     detentionLiability: "customer",
-    detentionChargeAmount: 5000
+    detentionChargeAmount: 5000,
+    createdAt: '2026-05-18T09:30:00.000Z'
   },
   {
     id: 'job-3',
@@ -712,9 +714,43 @@ export const INITIAL_JOBS: Job[] = [
     gateOutTimestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
     gateInTimestamp: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
     freeTimeDays: 7,
-    freeTimeExpiry: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // Completed on time
+    freeTimeExpiry: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
     detentionLiability: null,
-    detentionChargeAmount: 0
+    detentionChargeAmount: 0,
+    createdAt: '2026-05-16T10:00:00.000Z'
+  },
+  {
+    id: 'job-4',
+    regionId: 'IN',
+    jobNo: 'JB-2026-1004',
+    tenantId: 'tenant-1',
+    customerId: 'cust-2',
+    quotationId: 'quote-2',
+    rateItemId: 'qr-3',
+    scenario: 'EXP',
+    containerNo: 'OOLU5519233',
+    sealNo: 'SL-77823',
+    containerSize: '20GP',
+    weightKg: 18500,
+    shippingLine: 'OOCL',
+    vesselName: 'OOCL Hong Kong',
+    voyageNo: 'V-117N',
+    eta: '2026-06-02',
+    originLocationId: 'loc-depot-1',
+    destinationLocationId: 'loc-cust-2',
+    emptyPickupLocationId: 'loc-depot-1',
+    status: 'active',
+    milestones: createMilestonesForScenario('EXP'),
+    currentMilestoneIndex: 2,
+    hasDynamicInsertion: false,
+    extraSurchargesIncurred: [],
+    gateOutTimestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    freeTimeDays: 5,
+    freeTimeExpiry: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    detentionLiability: 'disputed',
+    detentionChargeAmount: 10000,
+    detentionNotes: 'Driver arrived at port gate before expiry but port queue delayed gate-in by 3 hours. Dispute raised with OOCL.',
+    createdAt: '2026-06-08T07:00:00.000Z'
   }
 ];
 

@@ -3,1410 +3,1826 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
-import { Customer, Quotation, LocationGeo, SurchargeRule, TariffRate, ScenarioType, ContainerSizeCode, QuotationRateItem, ShippingLine, ContainerType } from '../types';
-import { Plus, Check, FileText, ChevronRight, AlertCircle, Sparkles, DollarSign, Trash2, Printer, Eye, RotateCcw, ShieldAlert, ExternalLink, Award, CheckCircle2, Clock } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SURCHARGE_CATALOG, BASE_TARIFFS } from '../data';
+import {
+  Customer, Quotation, LocationGeo, SurchargeRule, TariffRate,
+  ScenarioType, QuotationRateItem, ShippingLine, ContainerType,
+  Zone, Vessel, Region, User, InvoiceSettings, Job
+} from '../types';
+import {
+  FileText, Copy, CheckCircle2, XCircle, Clock,
+  ChevronRight, ChevronLeft, Plus, Trash2, RefreshCw,
+  ArrowRight, Tag, Percent, DollarSign, AlertCircle, Info,
+  Search, Check, X, ExternalLink, Eye, ClipboardList, AlertTriangle,
+  RotateCcw, HelpCircle, Package, Ship, MapPin, FileCheck
+} from 'lucide-react';
+
+// ── types ────────────────────────────────────────────────────────
+interface RateItemDraft {
+  id: string;
+  containerTypeId: string;
+  useZone: boolean;
+  originZoneId: string;
+  destinationZoneId: string;
+  originLocationId: string;
+  destinationLocationId: string;
+  baseRate: number | '';
+  returnLegRate: number | '';
+  tariffLoadedMsg: string;
+}
+
+interface SurchargeToggle {
+  surchargeCode: string;
+  surchargeName: string;
+  amount: number;
+  originalAmount: number;
+  calculationMethod: string;
+  isIncluded: boolean;
+  enabled: boolean;
+  autoTrigger: boolean;
+}
 
 interface QuotationWizardProps {
   quotations: Quotation[];
   customers: Customer[];
   locations: LocationGeo[];
+  zones: Zone[];
+  vessels: Vessel[];
   shippingLines: ShippingLine[];
   containerTypes: ContainerType[];
-  onAddQuotation: (quote: Quotation) => void;
+  surcharges: SurchargeRule[];
+  tariffs: TariffRate[];
+  regions: Region[];
+  currentUser: User;
+  invoiceSettings: InvoiceSettings[];
+  quoteSequence: Record<string, number>;
+  jobs: Job[];
+  onAddQuotation: (q: Quotation) => void;
+  onUpdateQuotation: (q: Quotation) => void;
   onConfirmQuotation: (quoteId: string) => void;
   onNavigate: (tab: string) => void;
   onConvertToBooking: (customerId: string, quoteId: string, rateItemId?: string) => void;
-  quoteSequence: number;
-  onIncrementQuoteSequence: () => void;
+  onIncrementQuoteSequence: (regionId: string) => void;
 }
 
+// ── constants ────────────────────────────────────────────────────
+const SCENARIO_DESC: Record<ScenarioType, string> = {
+  IMP: 'Port → Customer → Empty Return to Depot',
+  EXP: 'Depot → Customer → Port (laden)',
+  Inland: 'Location to Location (no port)',
+  EMTY: 'Depot to Depot (empty)',
+  RETURN: 'Return container to shipping line',
+};
+const SCENARIO_ROT: Record<ScenarioType, 'yes' | 'no' | 'conditional'> = {
+  IMP: 'yes', EXP: 'yes', Inland: 'no', EMTY: 'conditional', RETURN: 'no',
+};
+const STATUS_BADGE: Record<string, string> = {
+  draft: 'bg-slate-100 text-slate-600 border-slate-200',
+  pending_approval: 'bg-amber-50 text-amber-700 border-amber-200',
+  confirmed: 'bg-green-50 text-green-700 border-green-200',
+  expired: 'bg-red-50 text-red-700 border-red-200',
+  superseded: 'bg-slate-100 text-slate-400 border-slate-200',
+};
+const SCENARIO_COLOR: Record<string, string> = {
+  IMP: 'bg-blue-100 text-blue-800', EXP: 'bg-emerald-100 text-emerald-800',
+  Inland: 'bg-purple-100 text-purple-800', EMTY: 'bg-slate-100 text-slate-600',
+  RETURN: 'bg-orange-100 text-orange-800',
+};
+const today = () => new Date().toISOString().slice(0, 10);
+const in90 = () => {
+  const d = new Date(); d.setDate(d.getDate() + 90);
+  return d.toISOString().slice(0, 10);
+};
+const blankItem = (): RateItemDraft => ({
+  id: `ri-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  containerTypeId: '', useZone: true,
+  originZoneId: '', destinationZoneId: '',
+  originLocationId: '', destinationLocationId: '',
+  baseRate: '', returnLegRate: '', tariffLoadedMsg: '',
+});
+
+const INCOTERMS = [
+  { code: 'EXW', label: 'EXW — Ex Works', desc: 'Buyer arranges all transport from seller\'s premises', freightPays: 'Consignee Pays' },
+  { code: 'FCA', label: 'FCA — Free Carrier', desc: 'Seller delivers to named carrier; haulage from there is buyer\'s', freightPays: 'Consignee Pays' },
+  { code: 'FOB', label: 'FOB — Free On Board', desc: 'Seller delivers to port; buyer pays haulage from port', freightPays: 'Consignee Pays' },
+  { code: 'CFR', label: 'CFR — Cost & Freight', desc: 'Seller pays freight to destination port; buyer pays haulage from port', freightPays: 'Shipper Pays' },
+  { code: 'CIF', label: 'CIF — Cost, Insurance & Freight', desc: 'Like CFR plus seller pays insurance to destination port', freightPays: 'Shipper Pays' },
+  { code: 'CPT', label: 'CPT — Carriage Paid To', desc: 'Seller pays transport to named place', freightPays: 'Shipper Pays' },
+  { code: 'CIP', label: 'CIP — Carriage & Insurance Paid', desc: 'Like CPT plus seller pays insurance', freightPays: 'Shipper Pays' },
+  { code: 'DAP', label: 'DAP — Delivered At Place', desc: 'Seller delivers to destination; buyer handles unloading', freightPays: 'Shipper Pays' },
+  { code: 'DDP', label: 'DDP — Delivered Duty Paid', desc: 'Seller responsible for full delivery including duties', freightPays: 'Shipper Pays' },
+];
+
+const in14 = () => {
+  const d = new Date(); d.setDate(d.getDate() + 14);
+  return d.toISOString().slice(0, 10);
+};
+
+const getMqcConsumption = (quotation: Quotation, jobs: Job[]) => {
+  if (!quotation.mqcVolume || !quotation.mqcPeriod || quotation.mqcPeriod === 'none') {
+    return { used: 0, committed: 0, remaining: 0, percentUsed: 0, periodLabel: 'No commitment', isOverCommitted: false, resetDate: '' };
+  }
+  const now = new Date();
+  let periodStart: Date, periodEnd: Date, periodLabel: string, resetDate: string;
+  if (quotation.mqcPeriod === 'monthly') {
+    periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    periodLabel = periodStart.toLocaleString('default', { month: 'long', year: 'numeric' });
+    resetDate = `1 ${next.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+  } else if (quotation.mqcPeriod === 'quarterly') {
+    const q = Math.floor(now.getMonth() / 3);
+    periodStart = new Date(now.getFullYear(), q * 3, 1);
+    periodEnd = new Date(now.getFullYear(), q * 3 + 3, 0);
+    const next = new Date(now.getFullYear(), q * 3 + 3, 1);
+    periodLabel = `Q${q + 1} ${now.getFullYear()}`;
+    resetDate = `1 ${next.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+  } else {
+    periodStart = new Date(now.getFullYear(), 0, 1);
+    periodEnd = new Date(now.getFullYear(), 11, 31);
+    periodLabel = `${now.getFullYear()}`;
+    resetDate = `1 Jan ${now.getFullYear() + 1}`;
+  }
+  const used = jobs.filter(j =>
+    j.quotationId === quotation.id &&
+    new Date(j.createdAt) >= periodStart &&
+    new Date(j.createdAt) <= periodEnd
+  ).length;
+  const committed = quotation.mqcVolume;
+  const remaining = Math.max(0, committed - used);
+  const percentUsed = Math.min(115, Math.round((used / committed) * 100));
+  return { used, committed, remaining, percentUsed, periodLabel, isOverCommitted: used > committed, resetDate };
+};
+
+const HAZMAT_CLASSES = [
+  'Class 1 — Explosives', 'Class 2 — Gases', 'Class 3 — Flammable Liquids',
+  'Class 4 — Flammable Solids', 'Class 5 — Oxidizers', 'Class 6 — Toxic Substances',
+  'Class 7 — Radioactive', 'Class 8 — Corrosives', 'Class 9 — Misc. Dangerous Goods',
+];
+
+const stepVariants = {
+  enter: (dir: number) => ({ x: dir > 0 ? 280 : -280, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir > 0 ? -280 : 280, opacity: 0 }),
+};
+
 export default function QuotationWizard({
-  quotations,
-  customers,
-  locations,
-  shippingLines,
-  containerTypes,
-  onAddQuotation,
-  onConfirmQuotation,
-  onNavigate,
-  onConvertToBooking,
-  quoteSequence,
-  onIncrementQuoteSequence
+  quotations, customers, locations, zones, vessels, shippingLines,
+  containerTypes, surcharges, tariffs, regions, currentUser,
+  invoiceSettings, quoteSequence, jobs,
+  onAddQuotation, onUpdateQuotation, onConfirmQuotation,
+  onNavigate, onConvertToBooking, onIncrementQuoteSequence,
 }: QuotationWizardProps) {
-  const [activeTab, setActiveTab] = useState<'directory' | 'create'>('directory');
-  const [activeStep, setActiveStep] = useState(1); // 4-step wizard
-  
-  // Create state
-  const [customerId, setCustomerId] = useState('');
-  const [rates, setRates] = useState<QuotationRateItem[]>([]);
-  const [notes, setNotes] = useState('');
-  const [selectedSurchargeCodes, setSelectedSurchargeCodes] = useState<string[]>(['FAF', 'CONG']);
-  const [surchargeOverrides, setSurchargeOverrides] = useState<Record<string, number>>(() => {
-    const initial: Record<string, number> = {};
-    SURCHARGE_CATALOG.forEach(s => {
-      initial[s.code] = s.amount;
-    });
-    return initial;
-  });
-  const [validFrom, setValidFrom] = useState(new Date().toISOString().split('T')[0]);
-  const [validTo, setValidTo] = useState(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [proposalStep, setProposalStep] = useState(1);
-  const [formData, setFormData] = useState<Partial<Quotation>>({
-    scenario: 'IMP',
-    currency: 'INR',
-    customerNotes: '',
-    internalNotes: '',
-  });
 
-  const wizardSteps = [
-    { id: 1, title: "Basic Information" },
-    { id: 2, title: "Route & Rates" },
-    { id: 3, title: "Surcharges" },
-    { id: 4, title: "Review & Save" }
-  ];
+  // ── left panel state ──────────────────────────────────────────
+  const [listSearch, setListSearch] = useState('');
+  const [listFilter, setListFilter] = useState<'all' | 'draft' | 'pending_approval' | 'confirmed' | 'expired' | 'superseded'>('all');
+  const [listSort, setListSort] = useState<'newest' | 'oldest' | 'name' | 'expiry'>('newest');
 
-  const handleNext = () => setProposalStep(prev => Math.min(prev + 1, 4));
-  const handleBack = () => setProposalStep(prev => Math.max(prev - 1, 1));
+  // ── right panel state ────────────────────────────────────────
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+  const [rightView, setRightView] = useState<'empty' | 'detail' | 'create'>('empty');
+  const [convertingQuoteId, setConvertingQuoteId] = useState<string | null>(null);
 
-  // State overrides representing the 7 points of premium commercial logic
-  const [paymentTermsOverride, setPaymentTermsOverride] = useState('Net 30 Days');
-  const [mqcVolume, setMqcVolume] = useState<number | ''>('');
-  const [mqcPeriod, setMqcPeriod] = useState<'Monthly' | 'Quarterly' | 'Yearly' | 'Per Contract'>('Monthly');
-  const [version, setVersion] = useState(0);
-  const [revisionNotes, setRevisionNotes] = useState('');
-  const [isHazmatOnly, setIsHazmatOnly] = useState(false);
-  const [requiresGenset, setRequiresGenset] = useState(false);
-  const [previewQuote, setPreviewQuote] = useState<Quotation | null>(null);
+  // ── wizard form state ─────────────────────────────────────────
+  const [step, setStep] = useState(1);
+  const [stepDir, setStepDir] = useState(1);
+  const [formCustomerId, setFormCustomerId] = useState('');
+  const [formScenario, setFormScenario] = useState<ScenarioType>('IMP');
+  const [formValidFrom, setFormValidFrom] = useState(today());
+  const [formValidTo, setFormValidTo] = useState(in90());
+  const [formEmtyRot, setFormEmtyRot] = useState(false);
+  const [formRateItems, setFormRateItems] = useState<RateItemDraft[]>([blankItem()]);
+  const [formSurcharges, setFormSurcharges] = useState<SurchargeToggle[]>([]);
+  const [formInternalNotes, setFormInternalNotes] = useState('');
+  const [formCustomerNotes, setFormCustomerNotes] = useState('');
+  const [clonedFromId, setClonedFromId] = useState<string | null>(null);
+  const [formOfferValidUntil, setFormOfferValidUntil] = useState(in14());
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
-  // Trigger auto surcharges based on special equipment cargo options
-  React.useEffect(() => {
-    if (isHazmatOnly) {
-      if (!selectedSurchargeCodes.includes('CONG')) {
-        setSelectedSurchargeCodes(prev => [...prev, 'CONG']);
-      }
-    }
-  }, [isHazmatOnly]);
+  // ── step 2 commercial terms state ────────────────────────────
+  const [formPaymentTerms, setFormPaymentTerms] = useState('');
+  const [formIncoterm, setFormIncoterm] = useState('');
+  const [formFreightResp, setFormFreightResp] = useState('');
+  const [formMqcVolume, setFormMqcVolume] = useState<number | ''>('');
+  const [formMqcPeriod, setFormMqcPeriod] = useState('None');
+  const [formIsHazmat, setFormIsHazmat] = useState(false);
+  const [formHazmatClass, setFormHazmatClass] = useState('');
+  const [formRequiresGenset, setFormRequiresGenset] = useState(false);
+  const [formDemurrageFreeDays, setFormDemurrageFreeDays] = useState<number | ''>('');
+  const [formDemurrageFlatRate, setFormDemurrageFlatRate] = useState<number | ''>('');
+  const [formDetentionFreeDays, setFormDetentionFreeDays] = useState<number | ''>('');
+  const [formDetentionFlatRate, setFormDetentionFlatRate] = useState<number | ''>('');
+  const [showIncotermTooltip, setShowIncotermTooltip] = useState(false);
 
-  React.useEffect(() => {
-    if (requiresGenset) {
-      if (!selectedSurchargeCodes.includes('CHASSIS')) {
-        setSelectedSurchargeCodes(prev => [...prev, 'CHASSIS']);
-      }
-    }
-  }, [requiresGenset]);
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
-  const [incoterm, setIncoterm] = useState<'FOB' | 'EXW' | 'DAP' | 'DDP' | 'CIF' | 'FCA' | 'FAS' | 'CFR' | 'CIP' | 'CPT'>('FOB');
-  const [freightResponsibility, setFreightResponsibility] = useState<'Shipper' | 'Consignee' | 'Third-Party'>('Consignee');
-  const [demurrageFreeDays, setDemurrageFreeDays] = useState<number | ''>(7);
-  const [detentionFreeDays, setDetentionFreeDays] = useState<number | ''>(5);
-  const [demurrageFlatRate, setDemurrageFlatRate] = useState<number | ''>(150);
-  const [detentionFlatRate, setDetentionFlatRate] = useState<number | ''>(150);
+  // ── derived ───────────────────────────────────────────────────
+  const selectedQuote = quotations.find(q => q.id === selectedQuoteId) ?? null;
+  const convertingQuote = quotations.find(q => q.id === convertingQuoteId) ?? null;
 
-  // Automatically suggest/adjust freight responsibility based on Incoterm selection
-  React.useEffect(() => {
-    if (['EXW', 'FCA', 'FAS', 'FOB'].includes(incoterm)) {
-      setFreightResponsibility('Consignee');
-    } else {
-      setFreightResponsibility('Shipper');
-    }
-  }, [incoterm]);
-
-  // Rate item draft state
-  const [scenarioType, setScenarioType] = useState<ScenarioType>('IMP');
-  const [fromLocId, setFromLocId] = useState('');
-  const [toLocId, setToLocId] = useState('');
-  const [contSize, setContSize] = useState<ContainerSizeCode>('40HC');
-  const [customRate, setCustomRate] = useState<number | ''>('');
-
-  // Lookup zones for automatic base tariff suggestion
-  const autoTariffLookup = useMemo(() => {
-    if (!fromLocId || !toLocId) return null;
-    const fromLoc = locations.find(l => l.id === fromLocId);
-    const toLoc = locations.find(l => l.id === toLocId);
-    if (!fromLoc || !toLoc) return null;
-
-    const matchedBase = BASE_TARIFFS.find(
-      t => t.scenario === scenarioType && 
-           t.fromZone === fromLoc.zone && 
-           t.toZone === toLoc.zone && 
-           t.size === contSize
+  // Initialize surcharges when scenario changes (only when no surcharges loaded yet)
+  useEffect(() => {
+    if (rightView !== 'create') return;
+    const applicable = surcharges.filter(s =>
+      s.isActive && (s.applicableScenarios.length === 0 || s.applicableScenarios.includes(formScenario))
     );
+    setFormSurcharges(applicable.map(s => ({
+      surchargeCode: s.code,
+      surchargeName: s.name,
+      amount: s.amount,
+      originalAmount: s.amount,
+      calculationMethod: s.calculationMethod,
+      isIncluded: false,
+      enabled: s.autoTrigger,
+      autoTrigger: s.autoTrigger,
+    })));
+  }, [formScenario, rightView]);
 
-    return matchedBase ? matchedBase.amount : null;
-  }, [fromLocId, toLocId, scenarioType, contSize, locations]);
+  // ── filtered/sorted list ──────────────────────────────────────
+  const filteredList = useMemo(() => {
+    let list = quotations;
+    if (listSearch.trim()) {
+      const q = listSearch.toLowerCase();
+      list = list.filter(qt => {
+        const c = customers.find(cx => cx.id === qt.customerId);
+        return qt.quoteNo.toLowerCase().includes(q) || c?.name.toLowerCase().includes(q);
+      });
+    }
+    if (listFilter !== 'all') list = list.filter(qt => qt.status === listFilter);
+    switch (listSort) {
+      case 'oldest': list = [...list].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '')); break;
+      case 'name':   list = [...list].sort((a, b) => {
+        const ca = customers.find(c => c.id === a.customerId)?.name ?? '';
+        const cb = customers.find(c => c.id === b.customerId)?.name ?? '';
+        return ca.localeCompare(cb);
+      }); break;
+      case 'expiry': list = [...list].sort((a, b) => (a.validTo ?? '').localeCompare(b.validTo ?? '')); break;
+      default:       list = [...list].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')); break;
+    }
+    return list;
+  }, [quotations, listSearch, listFilter, listSort, customers]);
 
-  // Set suggested rate when auto lookup changes
-  React.useEffect(() => {
-    if (autoTariffLookup !== null) {
-      setCustomRate(autoTariffLookup);
+  const tabCounts = useMemo(() => ({
+    all: quotations.length,
+    draft: quotations.filter(q => q.status === 'draft').length,
+    pending_approval: quotations.filter(q => q.status === 'pending_approval').length,
+    confirmed: quotations.filter(q => q.status === 'confirmed').length,
+    expired: quotations.filter(q => q.status === 'expired').length,
+    superseded: quotations.filter(q => q.status === 'superseded').length,
+  }), [quotations]);
+
+  // ── helpers ───────────────────────────────────────────────────
+  const generateQuoteNo = (regionId: string) => {
+    const year = new Date().getFullYear();
+    const region = regions.find(r => r.id === regionId);
+    const code = region?.code ?? regionId.toUpperCase();
+    const seq = (quoteSequence[regionId] ?? 0) + 1;
+    return `QT-${code}-${year}-${String(seq).padStart(4, '0')}`;
+  };
+
+  const daysUntilExpiry = (validTo: string) => {
+    const diff = new Date(validTo).getTime() - Date.now();
+    return Math.ceil(diff / 86400000);
+  };
+
+  const loadTariff = (item: RateItemDraft): number | null => {
+    const ct = containerTypes.find(c => c.id === item.containerTypeId);
+    if (!ct) return null;
+    let fromZone = '', toZone = '';
+    if (item.useZone) {
+      fromZone = zones.find(z => z.id === item.originZoneId)?.name ?? '';
+      toZone = zones.find(z => z.id === item.destinationZoneId)?.name ?? '';
     } else {
-      setCustomRate('');
+      fromZone = locations.find(l => l.id === item.originLocationId)?.zone ?? '';
+      toZone = locations.find(l => l.id === item.destinationLocationId)?.zone ?? '';
     }
-  }, [autoTariffLookup]);
-
-  const handleAddRateLine = () => {
-    if (!fromLocId || !toLocId || !customRate) {
-      alert('Please fill out Origin, Destination, and Rate values to load this pricing line.');
-      return;
-    }
-
-    const newLine: QuotationRateItem = {
-      id: `qr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      scenario: scenarioType,
-      fromLocationId: fromLocId,
-      toLocationId: toLocId,
-      containerSize: contSize,
-      baseRate: Number(customRate),
-      additionalSurcharges: selectedSurchargeCodes.map(code => {
-        const overriddenAmt = surchargeOverrides[code] ?? 0;
-        return {
-          code,
-          amount: overriddenAmt
-        };
-      })
-    };
-
-    setRates([...rates, newLine]);
-    setFromLocId('');
-    setToLocId('');
+    const match = tariffs.find(t => t.scenario === formScenario && t.fromZone === fromZone && t.toZone === toZone && t.size === ct.code);
+    return match?.amount ?? null;
   };
 
-  const handleRemoveRateLine = (id: string) => {
-    setRates(rates.filter(r => r.id !== id));
+  // ── wizard nav ────────────────────────────────────────────────
+  const goNext = () => { setStepDir(1); setStep(s => Math.min(s + 1, 4)); };
+  const goBack = () => { setStepDir(-1); setStep(s => Math.max(s - 1, 1)); };
+
+  const validateStep = (s: number): string | null => {
+    if (s === 1) {
+      if (!formCustomerId) return 'Please select a customer.';
+      if (!formValidFrom || !formValidTo) return 'Please set validity dates.';
+      if (formValidTo <= formValidFrom) return 'Valid To must be after Valid From.';
+    }
+    if (s === 3) {
+      if (formRateItems.length === 0) return 'Add at least one rate line.';
+      for (const item of formRateItems) {
+        if (!item.containerTypeId) return 'Select container type for all rate lines.';
+        if (item.baseRate === '' || Number(item.baseRate) <= 0) return 'Enter base charge for all rate lines.';
+      }
+    }
+    return null;
   };
 
-  const handleSaveQuotation = (status: 'draft' | 'confirmed') => {
-    if (!customerId) {
-      alert('Please select a Customer for this commercial rate agreement.');
-      return;
+  const handleNext = () => {
+    const err = validateStep(step);
+    if (err) { showToast(err, 'error'); return; }
+    goNext();
+  };
+
+  // ── open create form (fresh or clone) ─────────────────────────
+  const openCreate = (cloneFrom?: Quotation) => {
+    setStep(1);
+    setStepDir(1);
+    if (cloneFrom) {
+      setFormCustomerId(cloneFrom.customerId);
+      setFormScenario(cloneFrom.scenario ?? 'IMP');
+      setFormValidFrom(today());
+      setFormValidTo(in90());
+      setFormInternalNotes(cloneFrom.internalNotes ?? '');
+      setFormCustomerNotes(cloneFrom.customerNotes ?? '');
+      setFormRateItems((cloneFrom.rateItems ?? []).map(ri => ({
+        id: blankItem().id,
+        containerTypeId: ri.containerTypeId ?? '',
+        useZone: !!ri.originZoneId,
+        originZoneId: ri.originZoneId ?? '',
+        destinationZoneId: ri.destinationZoneId ?? '',
+        originLocationId: ri.originLocationId ?? '',
+        destinationLocationId: ri.destinationLocationId ?? '',
+        baseRate: ri.baseRate,
+        returnLegRate: ri.returnLegRate ?? 0,
+        tariffLoadedMsg: '',
+      })));
+      // surcharges will be reset by useEffect on formScenario
+      setClonedFromId(cloneFrom.id);
+    } else {
+      setFormCustomerId('');
+      setFormScenario('IMP');
+      setFormValidFrom(today());
+      setFormValidTo(in90());
+      setFormOfferValidUntil(in14());
+      setFormInternalNotes('');
+      setFormCustomerNotes('');
+      setFormRateItems([blankItem()]);
+      setFormSurcharges([]);
+      setClonedFromId(null);
+      setFormPaymentTerms('');
+      setFormIncoterm('');
+      setFormFreightResp('');
+      setFormMqcVolume('');
+      setFormMqcPeriod('None');
+      setFormIsHazmat(false);
+      setFormHazmatClass('');
+      setFormRequiresGenset(false);
+      setFormDemurrageFreeDays('');
+      setFormDemurrageFlatRate('');
+      setFormDetentionFreeDays('');
+      setFormDetentionFlatRate('');
     }
-    if (rates.length === 0) {
-      alert('A quotation must contain at least one configured pricing line.');
-      return;
-    }
+    setRightView('create');
+  };
 
-    const calculatedSurcharges: SurchargeRule[] = SURCHARGE_CATALOG.filter(s => 
-      selectedSurchargeCodes.includes(s.code)
-    ).map(s => ({
-      ...s,
-      amount: surchargeOverrides[s.code] ?? s.amount
-    }));
+  // ── save quotation ────────────────────────────────────────────
+  const handleSave = (saveStatus: 'draft' | 'pending_approval') => {
+    const err = validateStep(1) ?? validateStep(3);
+    if (err) { showToast(err, 'error'); return; }
 
-    const finalQuoteNo = version > 0 
-      ? `QT-22${Math.floor(Math.random() * 9000 + 1000)}-R${version}`
-      : `QT-22${Math.floor(Math.random() * 9000 + 1000)}`;
+    const regionId = currentUser.regionId || 'IN';
+    const fafToggle = formSurcharges.find(s => s.surchargeCode === 'FAF' && s.enabled);
 
+    const rateItems: QuotationRateItem[] = formRateItems.map(item => {
+      const ct = containerTypes.find(c => c.id === item.containerTypeId);
+      const base = Number(item.baseRate) || 0;
+      const ret = Number(item.returnLegRate) || 0;
+      const faf = fafToggle ? Math.round(base * fafToggle.amount / 100) : 0;
+      const rot = SCENARIO_ROT[formScenario] === 'yes' ? true
+        : SCENARIO_ROT[formScenario] === 'no' ? false : formEmtyRot;
+      return {
+        id: item.id,
+        containerType: ct?.code ?? '',
+        containerTypeId: item.containerTypeId,
+        containerSize: ct?.code,
+        originZoneId: item.useZone ? item.originZoneId : undefined,
+        destinationZoneId: item.useZone ? item.destinationZoneId : undefined,
+        originLocationId: !item.useZone ? item.originLocationId : undefined,
+        destinationLocationId: !item.useZone ? item.destinationLocationId : undefined,
+        baseRate: base,
+        currency: 'INR',
+        returnLegRate: ret,
+        estimatedFuelSurcharge: faf,
+        applicableSurcharges: formSurcharges.filter(s => s.enabled).map(s => ({
+          surchargeCode: s.surchargeCode,
+          surchargeName: s.surchargeName,
+          amount: s.amount,
+          calculationMethod: s.calculationMethod,
+          isIncluded: s.isIncluded,
+        })),
+        totalEstimatedValue: base + ret + faf,
+        rotRequired: rot,
+        notes: '',
+      };
+    });
+
+    const quoteNo = generateQuoteNo(regionId);
     const newQuote: Quotation = {
       id: `quote-${Date.now()}`,
-      quoteNo: finalQuoteNo,
-      tenantId: 'tenant-1',
-      customerId,
-      status,
-      validFrom,
-      validTo,
-      rates,
-      surcharges: calculatedSurcharges,
-      notes: notes || undefined,
-      paymentTermsOverride,
-      mqcVolume: mqcVolume !== '' ? Number(mqcVolume) : undefined,
-      mqcPeriod: mqcVolume !== '' ? mqcPeriod : undefined,
-      version,
-      revisionNotes: revisionNotes || undefined,
-      isHazmatOnly,
-      requiresGenset,
-      incoterm,
-      freightResponsibility,
-      demurrageFreeDays: demurrageFreeDays !== '' ? Number(demurrageFreeDays) : undefined,
-      detentionFreeDays: detentionFreeDays !== '' ? Number(detentionFreeDays) : undefined,
-      demurrageFlatRate: demurrageFlatRate !== '' ? Number(demurrageFlatRate) : undefined,
-      detentionFlatRate: detentionFlatRate !== '' ? Number(detentionFlatRate) : undefined,
+      quoteNo,
+      regionId,
+      customerId: formCustomerId,
+      scenario: formScenario,
+      status: saveStatus,
+      validFrom: formValidFrom,
+      validTo: formValidTo,
+      rateItems,
+      totalValue: rateItems.reduce((s, r) => s + (r.totalEstimatedValue ?? 0), 0),
+      currency: 'INR',
+      internalNotes: formInternalNotes,
+      customerNotes: formCustomerNotes,
+      createdBy: currentUser.id,
+      clonedFromId: clonedFromId ?? undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // offer + commercial terms
+      offerValidUntil: formOfferValidUntil || undefined,
+      paymentTermsOverride: formPaymentTerms || undefined,
+      incoterm: formIncoterm || undefined,
+      freightResponsibility: formFreightResp || undefined,
+      mqcVolume: formMqcVolume !== '' ? Number(formMqcVolume) : undefined,
+      mqcPeriod: formMqcPeriod !== 'None' ? formMqcPeriod : undefined,
+      isHazmatOnly: formIsHazmat || undefined,
+      hazmatClass: formHazmatClass || undefined,
+      requiresGenset: formRequiresGenset || undefined,
+      demurrageFreeDays: formDemurrageFreeDays !== '' ? Number(formDemurrageFreeDays) : undefined,
+      demurrageFlatRate: formDemurrageFlatRate !== '' ? Number(formDemurrageFlatRate) : undefined,
+      detentionFreeDays: formDetentionFreeDays !== '' ? Number(formDetentionFreeDays) : undefined,
+      detentionFlatRate: formDetentionFlatRate !== '' ? Number(formDetentionFlatRate) : undefined,
     };
 
     onAddQuotation(newQuote);
-    // Reset wizard
-    setCustomerId('');
-    setRates([]);
-    setNotes('');
-    setPaymentTermsOverride('Net 30 Days');
-    setMqcVolume('');
-    setMqcPeriod('Monthly');
-    setVersion(0);
-    setRevisionNotes('');
-    setIsHazmatOnly(false);
-    setRequiresGenset(false);
-    setIncoterm('FOB');
-    setFreightResponsibility('Consignee');
-    setDemurrageFreeDays(7);
-    setDetentionFreeDays(5);
-    setDemurrageFlatRate(150);
-    setDetentionFlatRate(150);
-    setSelectedSurchargeCodes(['FAF', 'CONG']);
-    setSurchargeOverrides(() => {
-      const initial: Record<string, number> = {};
-      SURCHARGE_CATALOG.forEach(s => {
-        initial[s.code] = s.amount;
-      });
-      return initial;
-    });
-    setActiveTab('directory');
+    onIncrementQuoteSequence(regionId);
+    showToast(`${quoteNo} saved as ${saveStatus === 'draft' ? 'draft' : 'pending approval'} ✓`);
+    setSelectedQuoteId(newQuote.id);
+    setRightView('detail');
   };
 
+  // ── status actions ────────────────────────────────────────────
+  const handleApprove = (q: Quotation) => {
+    onUpdateQuotation({ ...q, status: 'confirmed', confirmedBy: currentUser.id, confirmedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    showToast(`${q.quoteNo} confirmed ✓`);
+  };
+  const handleReject = (q: Quotation) => {
+    onUpdateQuotation({ ...q, status: 'draft', updatedAt: new Date().toISOString() });
+    showToast(`${q.quoteNo} returned to draft`);
+  };
+  const handleExpire = (q: Quotation) => {
+    onUpdateQuotation({ ...q, status: 'expired', updatedAt: new Date().toISOString() });
+    showToast(`${q.quoteNo} manually expired`);
+  };
+
+  const requiresApproval = invoiceSettings[0]?.requireApprovalBeforeSend ?? false;
+  const isManager = ['administrator', 'region_admin'].includes(currentUser.role);
+
+  // ── render helpers ────────────────────────────────────────────
+  const fmtCurrency = (n: number, cur = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(n);
+
+  // ═══════════════════════════════════════════════════════════════
   return (
-    <div className="space-y-6" id="quotation-module">
-      
-      {/* Tab Navigation */}
-      <div className="flex justify-between items-center border-b border-slate-200 pb-4">
-        <div>
-          <h1 className="text-xl font-black font-sans tracking-tight text-slate-900 flex items-center gap-2 uppercase">
-            <FileText className="text-blue-650 w-5 h-5 animate-pulse" /> Commercial Quotations Hub
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Build specialized customer-specific freight contracts and lock billing rules.
-          </p>
+    <div className="flex h-[calc(100vh-110px)] bg-slate-50 overflow-hidden">
+
+      {/* ── LEFT PANEL ── */}
+      <div className="w-80 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 space-y-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <FileText className="w-4 h-4 text-blue-600" /> Quotations
+            </h2>
+            <button
+              onClick={() => openCreate()}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded transition"
+            >
+              <Plus className="w-3 h-3" /> New
+            </button>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search quote no / customer..."
+              value={listSearch}
+              onChange={e => setListSearch(e.target.value)}
+              className="w-full pl-7 pr-3 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded focus:outline-none"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={listSort}
+              onChange={e => setListSort(e.target.value as typeof listSort)}
+              className="flex-1 text-[10px] border border-slate-200 rounded px-2 py-1 focus:outline-none bg-white"
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="name">Customer A–Z</option>
+              <option value="expiry">Expiry Soon</option>
+            </select>
+          </div>
+          {/* Filter tabs */}
+          <div className="flex gap-0.5 flex-wrap">
+            {(['all', 'draft', 'pending_approval', 'confirmed', 'expired', 'superseded'] as const).map(f => {
+              const labels: Record<string, string> = { all: 'All', draft: 'Draft', pending_approval: 'Pending', confirmed: 'Live', expired: 'Expired', superseded: 'Old' };
+              const count = tabCounts[f];
+              return (
+                <button
+                  key={f}
+                  onClick={() => setListFilter(f)}
+                  className={`text-[9px] font-bold px-2 py-1 rounded transition flex items-center gap-1 ${listFilter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                >
+                  {labels[f]}
+                  <span className={`text-[8px] px-1 py-0.5 rounded-full ${listFilter === f ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex bg-slate-100 border border-slate-200 p-1 rounded-md">
-          <button
-            onClick={() => setActiveTab('directory')}
-            className={`px-4 py-1.5 rounded-sm text-xs font-extrabold font-sans transition ${
-              activeTab === 'directory' 
-                ? 'bg-blue-600 text-white font-bold shadow-sm' 
-                : 'text-slate-500 hover:text-slate-855'
-            }`}
-          >
-            Quotation Registry ({quotations.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('create')}
-            className={`px-4 py-1.5 rounded-sm text-xs font-extrabold font-sans transition flex items-center gap-1.5 ${
-              activeTab === 'create' 
-                ? 'bg-blue-600 text-white font-bold shadow-sm' 
-                : 'text-slate-500 hover:text-slate-855'
-            }`}
-          >
-            <Plus className="w-3.5 h-3.5" /> Create Proposal
-          </button>
+        {/* Quote cards */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {filteredList.length === 0 ? (
+            <div className="text-center py-10 text-xs text-slate-400 italic">No quotations found.</div>
+          ) : filteredList.map(q => {
+            const cust = customers.find(c => c.id === q.customerId);
+            const expDays = daysUntilExpiry(q.validTo ?? '');
+            const expiringSoon = q.status === 'confirmed' && expDays >= 0 && expDays <= 14;
+            const isSelected = selectedQuoteId === q.id && rightView === 'detail';
+            const firstItem = (q.rateItems ?? [])[0];
+
+            // ── surcharge pills (card-level OR from first rate item) ──
+            const cardSurcharges = q.applicableSurcharges?.length
+              ? q.applicableSurcharges
+              : (q.rateItems?.[0]?.applicableSurcharges ?? []).map(s => ({
+                  code: s.surchargeCode,
+                  label: s.surchargeName,
+                  value: s.calculationMethod.toLowerCase().includes('percentage')
+                    ? `${s.amount}%`
+                    : fmtCurrency(s.amount, firstItem?.currency ?? 'INR'),
+                  category: (['FAF', 'FUEL'].includes(s.surchargeCode.toUpperCase()) ? 'fuel'
+                    : ['DET', 'DETENTION'].includes(s.surchargeCode.toUpperCase()) ? 'detention'
+                    : s.surchargeCode.toUpperCase().includes('PORT') ? 'port'
+                    : s.surchargeCode.toUpperCase().includes('WASH') ? 'wash'
+                    : 'other') as 'fuel' | 'detention' | 'port' | 'wash' | 'other',
+                  isNew: false,
+                }));
+            const surchargeColors: Record<string, string> = {
+              fuel: 'bg-amber-50 text-amber-700 border-amber-200',
+              detention: 'bg-red-50 text-red-700 border-red-200',
+              port: 'bg-blue-50 text-blue-700 border-blue-200',
+              wash: 'bg-purple-50 text-purple-700 border-purple-200',
+              other: 'bg-slate-50 text-slate-600 border-slate-200',
+            };
+            const visibleSurcharges = cardSurcharges.slice(0, 3);
+            const extraSurcharges = cardSurcharges.length - visibleSurcharges.length;
+            const allRateItems = q.rateItems ?? q.rates ?? [];
+            const paymentTerms = q.paymentTermsOverride || cust?.paymentTerms;
+            const freightLabel = q.freightResponsibility
+              ? q.freightResponsibility.toUpperCase().includes('CONSIGNEE') ? 'CONSIGNEE PAYS'
+                : q.freightResponsibility.toUpperCase().includes('SHIPPER') ? 'SHIPPER PAYS'
+                : 'THIRD PARTY'
+              : null;
+
+            return (
+              <motion.div
+                key={q.id}
+                whileHover={{ scale: 1.005 }}
+                onClick={() => { setSelectedQuoteId(q.id); setRightView('detail'); setConvertingQuoteId(null); }}
+                className={`p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+              >
+                {/* Row 1: quote no + status badge */}
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-mono text-[11px] font-bold text-blue-700">{q.quoteNo}</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${STATUS_BADGE[q.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                    {q.status === 'confirmed' ? '✓ CONFIRMED' : q.status === 'draft' ? 'DRAFT' : q.status === 'pending_approval' ? 'PENDING' : q.status.toUpperCase()}
+                  </span>
+                </div>
+
+                {/* Row 2: customer name */}
+                <div className="text-xs font-bold text-slate-800 truncate mt-0.5">{cust?.name ?? '—'}</div>
+
+                {/* Row 3: customer taxId */}
+                {(q.taxId || cust?.taxId) && (
+                  <div className="text-[9px] text-slate-400 font-mono mt-0.5">Tax ID: {q.taxId ?? cust?.taxId}</div>
+                )}
+
+                {/* Row 4: incoterm + freight responsibility pills */}
+                {(q.incoterm || freightLabel) && (
+                  <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                    {q.incoterm && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-blue-200 text-blue-600 bg-blue-50">{q.incoterm}</span>
+                    )}
+                    {freightLabel && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 bg-slate-50">{freightLabel}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 5: payment terms */}
+                {paymentTerms && (
+                  <div className="text-[9px] text-slate-400 mt-1">Terms: {paymentTerms}</div>
+                )}
+
+                {/* Row 6: rate items (max 2, +N more) */}
+                <div className="mt-1.5 space-y-0.5">
+                  {allRateItems.slice(0, 2).map((ri, i) => (
+                    <div key={ri.id ?? i} className="flex items-center gap-1.5 flex-wrap">
+                      {q.scenario && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[q.scenario]}`}>{q.scenario}</span>}
+                      <span className="text-[9px] text-slate-500 font-mono">{ri.containerType ?? ri.containerSize}</span>
+                      <span className="text-[9px] font-bold text-slate-700">{fmtCurrency(ri.baseRate, ri.currency ?? 'INR')}</span>
+                      {(ri.returnLegRate ?? 0) > 0 && (
+                        <span className="text-[9px] text-slate-400 flex items-center gap-0.5">
+                          <RotateCcw className="w-2.5 h-2.5" /> {fmtCurrency(ri.returnLegRate!, ri.currency ?? 'INR')}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {allRateItems.length > 2 && (
+                    <div className="text-[9px] text-slate-400 italic">+{allRateItems.length - 2} more rate items</div>
+                  )}
+                </div>
+
+                {/* Row 7: surcharge pills */}
+                {visibleSurcharges.length > 0 && (
+                  <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                    {visibleSurcharges.map(s => (
+                      <span key={s.code} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${surchargeColors[s.category ?? 'other']}`}>
+                        {s.code}: {s.value}
+                        {s.isNew && <span className="ml-0.5 text-[7px] font-black bg-amber-500 text-white px-0.5 rounded">NEW</span>}
+                      </span>
+                    ))}
+                    {extraSurcharges > 0 && (
+                      <span className="text-[9px] text-slate-400 font-bold">+{extraSurcharges}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 8: demurrage / detention */}
+                {(q.demurrageFreeDays || q.detentionFreeDays) && (
+                  <div className="mt-1.5 space-y-0.5">
+                    {q.demurrageFreeDays && (
+                      <div className="text-[9px] text-amber-600 flex items-center gap-1">
+                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                        Demurrage: {q.demurrageFreeDays}d Free{q.demurrageFlatRate ? ` (${fmtCurrency(q.demurrageFlatRate)}/d)` : ''}
+                      </div>
+                    )}
+                    {q.detentionFreeDays && (
+                      <div className="text-[9px] text-amber-600 flex items-center gap-1">
+                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                        Detention: {q.detentionFreeDays}d Free{q.detentionFlatRate ? ` (${fmtCurrency(q.detentionFlatRate)}/d)` : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 9: MQC strip */}
+                {q.mqcVolume && q.mqcPeriod && q.mqcPeriod !== 'none' && (() => {
+                  const mqc = getMqcConsumption(q, jobs);
+                  const barColor = mqc.isOverCommitted ? 'bg-red-500' : mqc.percentUsed >= 80 ? 'bg-amber-500' : 'bg-green-500';
+                  const textColor = mqc.isOverCommitted ? 'text-red-700' : mqc.percentUsed >= 80 ? 'text-amber-700' : 'text-green-700';
+                  return (
+                    <div className="mt-1.5 space-y-0.5">
+                      <div className={`text-[9px] font-bold flex items-center gap-1 ${textColor}`}>
+                        📦 {mqc.used}/{mqc.committed} containers — {mqc.periodLabel}
+                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100, mqc.percentUsed)}%` }} />
+                      </div>
+                      <div className="text-[8px] text-slate-400">{mqc.percentUsed}% used</div>
+                    </div>
+                  );
+                })()}
+
+                {/* Row 10: validity dates */}
+                <div className="text-[9px] text-slate-400 mt-1.5 font-mono">
+                  {q.validFrom} → {q.validTo}
+                </div>
+
+                {/* Row 10: expiry warning */}
+                {expiringSoon && (
+                  <div className="mt-1 text-[9px] text-amber-600 font-bold flex items-center gap-0.5">
+                    <AlertCircle className="w-2.5 h-2.5" /> Expires in {expDays}d
+                  </div>
+                )}
+                {q.clonedFromId && (
+                  <div className="mt-0.5 text-[9px] text-slate-400 italic">Cloned quote</div>
+                )}
+
+                {/* Row 11: action icons — stop propagation so clicks don't open detail twice */}
+                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-100" onClick={e => e.stopPropagation()}>
+                  <button
+                    title="View detail"
+                    onClick={() => { setSelectedQuoteId(q.id); setRightView('detail'); setConvertingQuoteId(null); }}
+                    className="flex items-center gap-0.5 text-[9px] font-bold text-slate-500 hover:text-blue-600 px-1.5 py-1 rounded hover:bg-blue-50 transition"
+                  >
+                    <Eye className="w-3 h-3" /> View
+                  </button>
+                  <button
+                    title="Clone"
+                    onClick={() => openCreate(q)}
+                    className="flex items-center gap-0.5 text-[9px] font-bold text-slate-500 hover:text-slate-700 px-1.5 py-1 rounded hover:bg-slate-100 transition"
+                  >
+                    <Copy className="w-3 h-3" /> Clone
+                  </button>
+                  {q.status === 'confirmed' && (
+                    <button
+                      title="Convert to Booking"
+                      onClick={() => { setSelectedQuoteId(q.id); setConvertingQuoteId(q.id); setRightView('detail'); }}
+                      className="flex items-center gap-0.5 text-[9px] font-bold text-blue-600 hover:text-blue-800 px-1.5 py-1 rounded hover:bg-blue-50 transition ml-auto"
+                    >
+                      <ClipboardList className="w-3 h-3" /> Booking
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'directory' ? (
-          /* ================== LIST DIRECTORY ================== */
-          <motion.div
-            key="directory"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="space-y-4"
-          >
-            {quotations.length === 0 ? (
-              <div className="border border-dashed border-slate-200 bg-white rounded-lg p-10 text-center shadow-xs">
-                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                <h3 className="text-slate-800 font-bold">No Quotations Found</h3>
-                <p className="text-xs text-slate-400 mt-1">Get started by creating your first customer tariff quotation proposal.</p>
-                <button
-                  onClick={() => setActiveTab('create')}
-                  className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold transition shadow shadow-blue-100"
-                >
-                  Create Quotation Now
-                </button>
-              </div>
-            ) : (
-              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 uppercase tracking-wider text-[10px] font-extrabold">
-                      <tr>
-                        <th className="px-5 py-3">Quotation No & Status</th>
-                        <th className="px-5 py-3">Customer Account</th>
-                        <th className="px-5 py-3">Validity Period</th>
-                        <th className="px-5 py-3">Configured Routes & Rates</th>
-                        <th className="px-5 py-3">Active Surcharges</th>
-                        <th className="px-5 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs font-sans text-slate-600">
-                      {quotations.map((quote) => {
-                        const customerObj = customers.find(c => c.id === quote.customerId);
-                        
-                        // Point 1: Reactive validity evaluation
-                        const today = new Date('2026-06-03');
-                        const exp = new Date(quote.expiryDate);
-                        const isExpired = today > exp;
-                        const diffDays = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 3600 * 24));
-                        const isExpiringSoon = quote.status === 'confirmed' && diffDays >= 0 && diffDays <= 30;
+      {/* ── RIGHT PANEL ── */}
+      <div className="flex-1 overflow-hidden flex flex-col relative">
 
-                        return (
-                          <tr key={quote.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-5 py-4 whitespace-nowrap">
-                              <div className="flex flex-col gap-1.5">
-                                <span className="font-mono text-xs text-blue-600 font-extrabold tracking-wider flex items-center gap-1">
-                                  {quote.quoteNo}
-                                  {(quote.version !== undefined && quote.version > 0) && (
-                                    <span className="bg-amber-100 border border-amber-250 text-amber-800 text-[8px] font-sans px-1 rounded">
-                                      Rev {quote.version}
-                                    </span>
-                                  )}
-                                </span>
-                                <div className="flex items-center gap-1.5">
-                                  {isExpired ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider bg-red-50 text-red-700 border border-red-200">
-                                      Expired
-                                    </span>
-                                  ) : isExpiringSoon ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
-                                      Expiring (In {diffDays}d)
-                                    </span>
-                                  ) : quote.status === 'confirmed' ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider bg-green-50 text-green-700 border border-green-200">
-                                      Active Contract
-                                    </span>
-                                  ) : (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
-                                      Draft Proposal
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="space-y-1">
-                                <h3 className="text-sm font-extrabold text-slate-900 font-sans tracking-tight">
-                                  {customerObj ? customerObj.name : 'Unknown Account'}
-                                </h3>
-                                <div className="flex flex-wrap gap-1 items-center">
-                                  {customerObj && (
-                                    <span className="text-[10px] text-slate-400 font-mono pr-2">Tax ID: {customerObj.taxId}</span>
-                                  )}
-                                  {/* Incoterms (Rules of Freight Responsibility) */}
-                                  {quote.incoterm && (
-                                    <span className="bg-blue-50 text-blue-700 px-1.5 py-0.2 select-none text-[9px] font-mono font-black rounded border border-blue-250 uppercase" title="Rules of Freight Responsibility">
-                                      {quote.incoterm} • {quote.freightResponsibility || 'Collect'}
-                                    </span>
-                                  )}
-                                  {/* Point 2: Credits Display */}
-                                  {quote.paymentTermsOverride && (
-                                    <span className="bg-slate-100/80 hover:bg-slate-200/50 text-slate-600 px-1.5 py-0.2 select-none text-[9px] font-sans font-bold rounded border border-slate-200">
-                                      Terms: {quote.paymentTermsOverride}
-                                    </span>
-                                  )}
-                                  {/* Point 3: MQC Volume display */}
-                                  {quote.mqcVolume !== undefined && (
-                                    <span className="bg-blue-50 text-blue-800 px-1.5 py-0.2 text-[9px] font-sans font-bold rounded border border-blue-100">
-                                      MQC: {quote.mqcVolume} TEU / {quote.mqcPeriod}
-                                    </span>
-                                  )}
-                                  {/* Point 7: Special Cargo Warnings */}
-                                  {quote.isHazmatOnly && (
-                                    <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.2 text-[9px] font-sans font-black rounded border border-emerald-100 uppercase tracking-wide">
-                                      HAZ
-                                    </span>
-                                  )}
-                                  {quote.requiresGenset && (
-                                    <span className="bg-sky-50 text-sky-850 px-1.5 py-0.2 text-[9px] font-sans font-black rounded border border-sky-100 uppercase tracking-wide">
-                                      GENSET
-                                    </span>
-                                  )}
-                                  {quote.demurrageFreeDays !== undefined && (
-                                    <span className="bg-amber-50/70 text-amber-900 px-1.5 py-0.2 text-[9px] font-sans font-bold rounded border border-amber-200" title={`Port Demurrage: ${quote.demurrageFreeDays} Free Days, thereafter $${quote.demurrageFlatRate || 150}/day`}>
-                                      Demurrage: {quote.demurrageFreeDays}d Free (${quote.demurrageFlatRate || 150}/d)
-                                    </span>
-                                  )}
-                                  {quote.detentionFreeDays !== undefined && (
-                                    <span className="bg-amber-50/70 text-amber-900 px-1.5 py-0.2 text-[9px] font-sans font-bold rounded border border-amber-200" title={`Warehouse Detention: ${quote.detentionFreeDays} Free Days, thereafter $${quote.detentionFlatRate || 150}/day`}>
-                                      Detention: {quote.detentionFreeDays}d Free (${quote.detentionFlatRate || 150}/d)
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-5 py-4 whitespace-nowrap font-mono text-[11px] text-slate-500 font-medium">
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-1 font-bold text-slate-800">
-                                  <span>{quote.effectiveDate}</span>
-                                  <span className="text-slate-400 font-normal">➔</span>
-                                  <span>{quote.expiryDate}</span>
-                                </div>
-                                <span className="text-[9px] text-slate-405 font-sans pt-0.5 font-semibold">Valid 365 Days Contract</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="space-y-1.5 max-w-sm">
-                                <div className="flex flex-wrap gap-1.5">
-                                  {quote.rates.map((r, idx) => (
-                                    <span key={idx} className="bg-slate-50 px-2 py-0.5 rounded text-[10px] border border-slate-200 font-mono text-slate-705 inline-flex items-center gap-1">
-                                      <strong className="text-blue-700">{r.scenario}</strong> • {r.containerSize} (${r.baseRate})
-                                    </span>
-                                  ))}
-                                </div>
-                                {quote.notes && (
-                                  <p className="text-[10px] text-slate-400 italic line-clamp-1" title={quote.notes}>
-                                    "{quote.notes}"
-                                  </p>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="flex flex-wrap gap-1.5 max-w-[200px]">
-                                {quote.surcharges.map((s, idx) => {
-                                  const originalSurcharge = SURCHARGE_CATALOG.find(orig => orig.code === s.code);
-                                  const isOverridden = originalSurcharge && originalSurcharge.amount !== s.amount;
-                                  return (
-                                    <span 
-                                      key={idx} 
-                                      className={`border rounded px-1.5 py-0.5 text-[9px] font-mono font-extrabold uppercase tracking-wider inline-flex items-center gap-1 ${
-                                        isOverridden 
-                                          ? 'bg-amber-50 text-amber-800 border-amber-200' 
-                                          : 'bg-blue-50 text-blue-800 border-blue-100'
-                                      }`}
-                                      title={`${s.name} (${s.calculationMethod})`}
-                                    >
-                                      {s.code}: ${s.amount}
-                                      {isOverridden && <span className="text-[7px] bg-amber-200 font-sans px-1 text-amber-900 rounded scale-90 font-black">NEG</span>}
-                                    </span>
-                                  );
-                                })}
-                                {quote.surcharges.length === 0 && (
-                                  <span className="text-slate-400 text-[10px] italic">No Surcharges</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-5 py-4 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-1.5">
-                                
-                                {/* Point 4: Preview Modal activation */}
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewQuote(quote)}
-                                  className="p-1.5 hover:bg-slate-100 border border-slate-200 rounded text-slate-600 hover:text-slate-900 transition"
-                                  title="Print Preview Proposal Sheet"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </button>
+        {/* ── EMPTY STATE ── */}
+        {rightView === 'empty' && (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <FileText className="w-12 h-12 text-slate-200 mb-4" />
+            <h3 className="text-sm font-bold text-slate-700">Select a quotation</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs">
+              Choose a quote from the list, or create a new one to get started.
+            </p>
+            <button
+              onClick={() => openCreate()}
+              className="mt-4 flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> New Quotation
+            </button>
+          </div>
+        )}
 
-                                {/* Point 6: Revision triggers */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setCustomerId(quote.customerId);
-                                    setValidFrom(quote.validFrom);
-                                    setValidTo(quote.validTo);
-                                    setRates(quote.rates);
-                                    setNotes(quote.notes || '');
-                                    setPaymentTermsOverride(quote.paymentTermsOverride || 'Net 30 Days');
-                                    setMqcVolume(quote.mqcVolume || '');
-                                    setMqcPeriod(quote.mqcPeriod || 'Monthly');
-                                    setVersion((quote.version || 0) + 1);
-                                    setRevisionNotes(`Revision of ${quote.quoteNo} - Rate update`);
-                                    setIsHazmatOnly(quote.isHazmatOnly || false);
-                                    setRequiresGenset(quote.requiresGenset || false);
-                                    setIncoterm(quote.incoterm || 'FOB');
-                                    setFreightResponsibility(quote.freightResponsibility || 'Consignee');
-                                    setDemurrageFreeDays(quote.demurrageFreeDays !== undefined ? quote.demurrageFreeDays : 7);
-                                    setDetentionFreeDays(quote.detentionFreeDays !== undefined ? quote.detentionFreeDays : 5);
-                                    setDemurrageFlatRate(quote.demurrageFlatRate !== undefined ? quote.demurrageFlatRate : 150);
-                                    setDetentionFlatRate(quote.detentionFlatRate !== undefined ? quote.detentionFlatRate : 150);
-                                    setSelectedSurchargeCodes(quote.surcharges.map(s => s.code));
-                                    
-                                    const overrides: Record<string, number> = {};
-                                    SURCHARGE_CATALOG.forEach(s => {
-                                      const existing = quote.surcharges.find(sc => sc.code === s.code);
-                                      overrides[s.code] = existing ? existing.amount : s.amount;
-                                    });
-                                    setSurchargeOverrides(overrides);
-                                    setActiveTab('create');
-                                  }}
-                                  className="p-1.5 hover:bg-slate-100 border border-slate-200 rounded text-slate-600 hover:text-slate-900 transition"
-                                  title="Revise Quote Surcharges/Rates"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </button>
-
-                                {/* Point 5: Convert Directly to Booking */}
-                                {quote.status === 'confirmed' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onConvertToBooking(quote.customerId, quote.id, quote.rates[0]?.id)}
-                                    className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white rounded text-[10px] font-bold flex items-center gap-1 transition"
-                                    title="Convert directly to container booking order"
-                                  >
-                                    <ExternalLink className="w-3 h-3" /> Booking
-                                  </button>
-                                )}
-
-                                {quote.status === 'draft' && (
-                                  <button
-                                    id={`approve-quote-${quote.id}`}
-                                    onClick={() => onConfirmQuotation(quote.id)}
-                                    className="bg-green-600 hover:bg-green-700 hover:scale-[1.01] active:scale-[0.99] text-white font-extrabold px-3 py-1.5 rounded text-[10px] inline-flex items-center gap-1 transition shadow-xs"
-                                  >
-                                    <Check className="w-3.5 h-3.5" /> Approve
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        ) : (
-          /* ================== CREATE TARIFF BUILDER ================== */
-          <motion.div
-            key="create-wizard"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-6"
-          >
-            {/* Form Column */}
-            <div className="lg:col-span-12 bg-white border border-slate-200 p-5 rounded-lg space-y-6 shadow-sm">
-              
-              {/* Part A: Target Customer & Validity Parameters */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border border-slate-200 bg-slate-50/30 p-4 rounded-lg animate-fade-in">
-                <div className="col-span-1 md:col-span-3 border-b border-dashed border-slate-200 pb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Award className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-[10px] font-bold uppercase text-slate-700 tracking-wide font-sans">
-                      Part A: Target Customer & Validity Parameters
+        {/* ── DETAIL VIEW ── */}
+        {rightView === 'detail' && selectedQuote && !convertingQuoteId && (
+          <div className="flex-1 overflow-y-auto">
+            {/* Detail header */}
+            <div className="px-6 py-4 border-b border-slate-200 bg-white flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="font-mono text-xl font-black text-slate-900">{selectedQuote.quoteNo}</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded border ${STATUS_BADGE[selectedQuote.status]}`}>
+                    {selectedQuote.status.replace('_', ' ').toUpperCase()}
+                  </span>
+                  {selectedQuote.clonedFromId && (
+                    <span className="text-[10px] text-slate-400 italic bg-slate-100 px-2 py-0.5 rounded">
+                      Cloned from {quotations.find(q => q.id === selectedQuote.clonedFromId)?.quoteNo ?? selectedQuote.clonedFromId}
                     </span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 font-mono italic font-semibold">General agreement scope</span>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 font-sans">Target Customer Account *</label>
-                  <select
-                    value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">-- Choose Customer --</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.taxId})</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 font-sans">Agreement Effective *</label>
-                  <input
-                    type="date"
-                    value={validFrom}
-                    onChange={(e) => setValidFrom(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-700 font-mono focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 font-sans">Agreement Expiration *</label>
-                  <input
-                    type="date"
-                    value={validTo}
-                    onChange={(e) => setValidTo(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-3 py-1.5 text-xs text-slate-700 font-mono focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+                <div className="text-base font-bold text-slate-800">{customers.find(c => c.id === selectedQuote.customerId)?.name}</div>
               </div>
-
-              {/* Part B: Commercial Parameters, Incoterms, & Special Equipment Profiles */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 border border-blue-200 bg-blue-50/15 rounded-lg animate-fade-in">
-                <div className="col-span-1 md:col-span-5 border-b border-dashed border-blue-200 pb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-[10px] font-bold uppercase text-slate-700 tracking-wide font-sans">
-                      Part B: Commercial Parameters & Special Cargo Profiles
-                    </span>
-                  </div>
-                  <span className="text-[9px] text-blue-500 font-mono italic font-semibold">Incoterms, payment terms & cargo equipment options</span>
-                </div>
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans">Payment Terms / Credit Limit</label>
-                  <select
-                    value={paymentTermsOverride}
-                    onChange={(e) => setPaymentTermsOverride(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="Net 30 Days">Net 30 Days (Standard)</option>
-                    <option value="Net 15 Days">Net 15 Days</option>
-                    <option value="Net 45 Days">Net 45 Days</option>
-                    <option value="Net 60 Days">Net 60 Days</option>
-                    <option value="Net 7 Days">Net 7 Days</option>
-                    <option value="Prepaid">Prepaid (Prior to Release)</option>
-                    <option value="COD">COD (Cash on Delivery)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans">Incoterms Rules (Rules of Freight)</label>
-                  <select
-                    value={incoterm}
-                    onChange={(e) => setIncoterm(e.target.value as any)}
-                    className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs font-black text-blue-700 bg-blue-50/20 font-sans focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="FOB">FOB (Free On Board)</option>
-                    <option value="EXW">EXW (Ex Works)</option>
-                    <option value="FCA">FCA (Free Carrier)</option>
-                    <option value="FAS">FAS (Free Alongside Ship)</option>
-                    <option value="DAP">DAP (Delivered at Place)</option>
-                    <option value="DDP">DDP (Delivered Duty Paid)</option>
-                    <option value="CIF">CIF (Cost, Insurance & Freight)</option>
-                    <option value="CFR">CFR (Cost & Freight)</option>
-                    <option value="CPT">CPT (Carriage Paid To)</option>
-                    <option value="CIP">CIP (Carriage & Insurance Paid To)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans">Freight Responsibility Class</label>
-                  <select
-                    value={freightResponsibility}
-                    onChange={(e) => setFreightResponsibility(e.target.value as any)}
-                    className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="Consignee">Consignee Pays Freight (Collect)</option>
-                    <option value="Shipper">Shipper Pays Freight (Prepaid)</option>
-                    <option value="Third-Party">Third-Party Logistics (3PL)</option>
-                  </select>
-                </div>
-                
-                <div className="space-y-1.5 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans">Vol Commit (MQC)</label>
-                    <input
-                      type="number"
-                      placeholder="Qty"
-                      value={mqcVolume}
-                      onChange={(e) => setMqcVolume(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans">Period</label>
-                    <select
-                      value={mqcPeriod}
-                      onChange={(e) => setMqcPeriod(e.target.value as any)}
-                      className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-805 font-sans focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="Monthly">Monthly</option>
-                      <option value="Quarterly">Quarterly</option>
-                      <option value="Yearly">Yearly</option>
-                      <option value="Per Contract">Per Contract</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 text-xs flex flex-col justify-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Special Cargo Profiles</span>
-                  <div className="flex flex-col gap-1 text-xs">
-                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-755 hover:text-slate-900 select-none">
-                      <input
-                        type="checkbox"
-                        checked={isHazmatOnly}
-                        onChange={(e) => setIsHazmatOnly(e.target.checked)}
-                        className="rounded border-slate-300 accent-blue-600 focus:ring-blue-500"
-                      />
-                      <span>Hazardous Cargo</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-755 hover:text-slate-900 select-none">
-                      <input
-                        type="checkbox"
-                        checked={requiresGenset}
-                        onChange={(e) => setRequiresGenset(e.target.checked)}
-                        className="rounded border-slate-300 accent-blue-600 focus:ring-blue-500"
-                      />
-                      <span>Genset Required</span>
-                    </label>
-                  </div>
-                </div>
+              <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+                {selectedQuote.status === 'draft' && (
+                  <>
+                    <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Edit</button>
+                    <button onClick={() => {
+                      onUpdateQuotation({ ...selectedQuote, status: 'pending_approval', updatedAt: new Date().toISOString() });
+                      showToast('Submitted for approval ✓');
+                    }} className="btn-primary flex items-center gap-1"><ChevronRight className="w-3 h-3" /> Submit for Approval</button>
+                  </>
+                )}
+                {selectedQuote.status === 'pending_approval' && isManager && (
+                  <>
+                    <button onClick={() => handleReject(selectedQuote)} className="btn-danger flex items-center gap-1"><XCircle className="w-3 h-3" /> Reject → Draft</button>
+                    <button onClick={() => handleApprove(selectedQuote)} className="btn-success flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Approve &amp; Confirm</button>
+                  </>
+                )}
+                {selectedQuote.status === 'confirmed' && (
+                  <>
+                    <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><Copy className="w-3 h-3" /> Clone</button>
+                    <button onClick={() => setConvertingQuoteId(selectedQuote.id)} className="btn-primary flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Convert to Booking</button>
+                    <button onClick={() => handleExpire(selectedQuote)} className="btn-danger flex items-center gap-1"><Clock className="w-3 h-3" /> Expire</button>
+                  </>
+                )}
+                {selectedQuote.status === 'expired' && (
+                  <button onClick={() => openCreate(selectedQuote)} className="btn-secondary flex items-center gap-1"><Copy className="w-3 h-3" /> Clone</button>
+                )}
               </div>
+            </div>
 
-              {/* Part C: Localized Demurrage & Detention Free-Time Parameter Policies */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 border border-slate-200 bg-slate-50/50 rounded-lg animate-fade-in space-y-0.5 md:space-y-0">
-                <div className="col-span-1 md:col-span-4 border-b border-dashed border-slate-200 pb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-600" />
-                    <span className="text-[10px] font-bold uppercase text-slate-700 tracking-wide font-sans">
-                      Part C: Localized Demurrage & Detention Free-Time Parameter Policies
-                    </span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 font-mono italic">Highly negotiated client-specific settings</span>
-                </div>
+            {/* Info strip */}
+            <div className="px-6 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-4 flex-wrap text-xs">
+              {selectedQuote.scenario && <span className={`font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[selectedQuote.scenario]}`}>{selectedQuote.scenario}</span>}
+              <span className="text-slate-500">Region: <strong>{selectedQuote.regionId}</strong></span>
+              <span className="text-slate-500">Currency: <strong>{selectedQuote.currency}</strong></span>
+              {selectedQuote.confirmedBy && <span className="text-green-600">Confirmed by {selectedQuote.confirmedBy}</span>}
+            </div>
 
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans flex items-center gap-1">
-                    Port Demurrage Free Time (Days)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 7"
-                    value={demurrageFreeDays}
-                    onChange={(e) => setDemurrageFreeDays(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[9px] text-slate-400">Permitted calendar days free at port terminals before storage charges apply.</p>
-                </div>
+            <div className="p-6 space-y-5">
 
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans flex items-center gap-1">
-                    Over-Time Demurrage Flat Rate
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1.5 text-slate-400 font-mono text-xs">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="e.g. 150"
-                      value={demurrageFlatRate}
-                      onChange={(e) => setDemurrageFlatRate(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded pl-6 pr-2.5 py-1.5 text-xs text-slate-800 font-mono focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400">Daily storage rate ($) assessed after port free-time has expired.</p>
-                </div>
-
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans flex items-center gap-1">
-                    Warehouse Detention Free Time (Days)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 5"
-                    value={detentionFreeDays}
-                    onChange={(e) => setDetentionFreeDays(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[9px] text-slate-400">Permitted holding days at client consignee depot/warehouse before fine.</p>
-                </div>
-
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide font-sans flex items-center gap-1">
-                    Over-Time Detention Flat Rate
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1.5 text-slate-400 font-mono text-xs">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="e.g. 150"
-                      value={detentionFlatRate}
-                      onChange={(e) => setDetentionFlatRate(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded pl-6 pr-2.5 py-1.5 text-xs text-slate-800 font-mono focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400">Daily cost ($) charged for extra container-on-chassis warehouse retention.</p>
-                </div>
-              </div>
-
-              {version > 0 && (
-                <div className="bg-amber-50/75 border border-amber-250 p-3.5 rounded-lg text-xs space-y-1">
-                  <div className="flex items-center gap-2 font-bold text-amber-800">
-                    <RotateCcw className="w-4 h-4 text-amber-600" />
-                    <span>Configuring Revision (Round {version})</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">You are editing an active revision of this quotation contract. Please specify the commercial justification notes below:</p>
-                  <input
-                    type="text"
-                    placeholder="e.g., Adjusting fuel surcharge due to index shift or terminal congestion updates"
-                    value={revisionNotes}
-                    onChange={(e) => setRevisionNotes(e.target.value)}
-                    className="w-full bg-white border border-amber-200 rounded px-3 py-1.5 mt-1 text-xs text-amber-900 placeholder:text-amber-300 focus:outline-none focus:border-amber-400 font-sans"
-                  />
-                </div>
-              )}
-
-              {isHazmatOnly && (
-                <div className="bg-emerald-50/50 border border-emerald-200 p-3 rounded-lg flex items-center gap-2.5 text-xs text-emerald-800">
-                  <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <p className="font-medium animate-pulse">
-                    <strong className="font-extrabold uppercase text-[9px] tracking-wide inline-block bg-emerald-100 px-1.5 rounded mr-1.5">Hazmat Verified</strong> 
-                    Port Congestion Fee Surcharge (<strong>CONG</strong>) has been automatically selected at default rate.
-                  </p>
-                </div>
-              )}
-
-              {requiresGenset && (
-                <div className="bg-sky-50/50 border border-sky-200 p-3 rounded-lg flex items-center gap-2.5 text-xs text-sky-850">
-                  <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0" />
-                  <p className="font-medium">
-                    <strong className="font-extrabold uppercase text-[9px] tracking-wide inline-block bg-sky-100 px-1.5 rounded mr-1.5">Genset Verified</strong> 
-                    Extended chassis idle parking surcharge (<strong>CHASSIS</strong>) is recommended and auto-selected for Night Holdovers.
-                  </p>
-                </div>
-              )}
-
-              {/* Build Tariff Pricing Leg */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-blue-650 font-mono flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Append Scenario Pricing Lines
-                  </h3>
-                  <span className="text-[10px] text-slate-400 font-mono">Build point-to-point legs</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 bg-slate-50 border border-slate-200 p-4 rounded-lg">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500">Scenario Type</label>
-                    <select
-                      value={scenarioType}
-                      onChange={(e) => setScenarioType(e.target.value as ScenarioType)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                    >
-                      <option value="IMP">IMP (Import)</option>
-                      <option value="EXP">EXP (Export)</option>
-                      <option value="Inland">Inland Moves</option>
-                      <option value="EMTY">EMTY Reposition</option>
-                      <option value="RETURN">RETURN Depot</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500">Origin Node</label>
-                    <select
-                      value={fromLocId}
-                      onChange={(e) => setFromLocId(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                    >
-                      <option value="">Origin Node...</option>
-                      {locations.map(l => (
-                        <option key={l.id} value={l.id}>{l.name} [{l.code}]</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500">Destination Node</label>
-                    <select
-                      value={toLocId}
-                      onChange={(e) => setToLocId(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                    >
-                      <option value="">Destination Node...</option>
-                      {locations.map(l => (
-                        <option key={l.id} value={l.id}>{l.name} [{l.code}]</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500">Container / Size</label>
-                    <select
-                      value={contSize}
-                      onChange={(e) => setContSize(e.target.value as ContainerSizeCode)}
-                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-bold"
-                    >
-                      {containerTypes.filter(ct => ct.isActive).map(ct => (
-                        <option key={ct.id} value={ct.code}>{ct.code} — {ct.name} ({ct.category})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 flex justify-between">
-                      Base Charge
-                      {autoTariffLookup !== null && (
-                        <span className="text-[9px] text-blue-600 font-mono font-bold">Auto Suggest</span>
+              {/* ── VALIDITY SECTION ── */}
+              {(() => {
+                const isPreConfirm = ['draft', 'pending_approval'].includes(selectedQuote.status);
+                const offerDays = selectedQuote.offerValidUntil ? daysUntilExpiry(selectedQuote.offerValidUntil) : null;
+                const contractDays = selectedQuote.status === 'confirmed' ? daysUntilExpiry(selectedQuote.validTo) : null;
+                return (
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" /> Validity
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 space-y-2.5 text-xs">
+                      {selectedQuote.offerValidUntil && (
+                        <div className={`flex items-start gap-2 p-2.5 rounded-lg border ${isPreConfirm ? (offerDays !== null && offerDays <= 7 ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200') : 'bg-slate-50 border-slate-200'}`}>
+                          <AlertCircle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${isPreConfirm ? (offerDays !== null && offerDays <= 7 ? 'text-red-500' : 'text-amber-500') : 'text-slate-400'}`} />
+                          <div>
+                            <div className="font-bold text-slate-700">Offer Valid Until: <span className="font-mono">{selectedQuote.offerValidUntil}</span></div>
+                            {isPreConfirm && offerDays !== null && (
+                              <div className={`text-[10px] font-bold mt-0.5 ${offerDays <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
+                                {offerDays > 0 ? `⏰ Expires in ${offerDays} day${offerDays !== 1 ? 's' : ''} — customer must approve by ${selectedQuote.offerValidUntil}` : 'Offer deadline has passed'}
+                              </div>
+                            )}
+                            <div className="text-[10px] text-slate-400 mt-0.5">offer approval deadline</div>
+                          </div>
+                        </div>
                       )}
-                    </label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-2 top-2.5 w-3 h-3 text-slate-400" />
-                      <input
-                        type="number"
-                        placeholder="Rate in USD"
-                        value={customRate}
-                        onChange={(e) => setCustomRate(e.target.value === '' ? '' : Number(e.target.value))}
-                        className="w-full bg-white border border-slate-200 rounded pl-6 pr-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500 transition-colors"
-                      />
+                      {selectedQuote.status === 'confirmed' && (
+                        <div className={`flex items-start gap-2 p-2.5 rounded-lg border ${contractDays !== null && contractDays <= 30 ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
+                          <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${contractDays !== null && contractDays <= 30 ? 'text-amber-500' : 'text-green-500'}`} />
+                          <div>
+                            <div className="font-bold text-slate-700">
+                              Contract Period: <span className="font-mono">{selectedQuote.validFrom}</span> → <span className="font-mono">{selectedQuote.validTo}</span>
+                            </div>
+                            {contractDays !== null && contractDays <= 30 && (
+                              <div className="text-[10px] font-bold text-amber-600 mt-0.5">⏰ Contract expires in {contractDays} day{contractDays !== 1 ? 's' : ''}</div>
+                            )}
+                            <div className="text-[10px] text-slate-400 mt-0.5">bookings allowed in this window</div>
+                          </div>
+                        </div>
+                      )}
+                      {selectedQuote.status !== 'confirmed' && (
+                        <div className="text-[10px] text-slate-400 flex gap-1">
+                          <span>Contract period:</span>
+                          <span className="font-mono">{selectedQuote.validFrom} → {selectedQuote.validTo}</span>
+                          <span>(active once confirmed)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── COMMERCIAL TERMS ── */}
+              {(selectedQuote.incoterm || selectedQuote.freightResponsibility || selectedQuote.paymentTermsOverride || selectedQuote.mqcVolume || selectedQuote.isHazmatOnly || selectedQuote.requiresGenset || selectedQuote.demurrageFreeDays || selectedQuote.detentionFreeDays) && (
+                <div className="space-y-3">
+                  {/* Payment & Trade */}
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <Ship className="w-3 h-3" /> Commercial Terms
+                      </span>
+                    </div>
+                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                      <div>
+                        <span className="text-slate-400">Incoterm:</span>{' '}
+                        {selectedQuote.incoterm
+                          ? <><strong className="font-mono font-black">{selectedQuote.incoterm}</strong>
+                            <span className="block text-[10px] text-slate-400 mt-0.5 italic">{INCOTERMS.find(i => i.code === selectedQuote.incoterm)?.desc}</span></>
+                          : <span className="text-slate-400">—</span>}
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Freight:</span>{' '}
+                        <strong>{selectedQuote.freightResponsibility ?? '—'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Payment Terms:</span>{' '}
+                        <strong>{selectedQuote.paymentTermsOverride ?? customers.find(c => c.id === selectedQuote.customerId)?.paymentTerms ?? '—'}</strong>
+                      </div>
+                      {selectedQuote.mqcVolume && selectedQuote.mqcPeriod && selectedQuote.mqcPeriod !== 'none' && (
+                        <div>
+                          <span className="text-slate-400">Volume Commitment:</span>{' '}
+                          <strong>{selectedQuote.mqcVolume} containers / {selectedQuote.mqcPeriod}</strong>
+                        </div>
+                      )}
+                      {selectedQuote.isHazmatOnly && (
+                        <div className="text-red-700">
+                          <span className="text-slate-400">Hazardous Cargo:</span>{' '}
+                          <strong>Yes{selectedQuote.hazmatClass ? ` — ${selectedQuote.hazmatClass}` : ''}</strong>
+                        </div>
+                      )}
+                      {selectedQuote.requiresGenset && (
+                        <div><span className="text-slate-400">Genset Required:</span> <strong>Yes</strong></div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="sm:col-span-2 md:col-span-5 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={handleAddRateLine}
-                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition flex items-center gap-1 shadow-sm"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Append Rate Leg
-                    </button>
-                  </div>
+                  {/* Free time & detention */}
+                  {(selectedQuote.demurrageFreeDays || selectedQuote.detentionFreeDays) && (
+                    <div className="border border-amber-200 rounded-lg overflow-hidden">
+                      <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3" /> Free Time &amp; Detention Policy
+                        </span>
+                      </div>
+                      <div className="px-4 py-3 space-y-1.5 text-xs">
+                        {selectedQuote.demurrageFreeDays && (
+                          <div className="text-slate-700">
+                            Port Demurrage: <strong>{selectedQuote.demurrageFreeDays} days free</strong>
+                            {selectedQuote.demurrageFlatRate ? <>, <strong className="text-amber-700">{fmtCurrency(selectedQuote.demurrageFlatRate)}/day</strong> after</> : ''}
+                          </div>
+                        )}
+                        {selectedQuote.detentionFreeDays && (
+                          <div className="text-slate-700">
+                            Warehouse Detention: <strong>{selectedQuote.detentionFreeDays} days free</strong>
+                            {selectedQuote.detentionFlatRate ? <>, <strong className="text-amber-700">{fmtCurrency(selectedQuote.detentionFlatRate)}/day</strong> after</> : ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* MQC tracking */}
+                  {selectedQuote.mqcVolume && selectedQuote.mqcPeriod && selectedQuote.mqcPeriod !== 'none' && (() => {
+                    const mqc = getMqcConsumption(selectedQuote, jobs);
+                    const barColor = mqc.isOverCommitted ? 'bg-red-500' : mqc.percentUsed >= 80 ? 'bg-amber-500' : 'bg-green-500';
+                    return (
+                      <div className={`border rounded-lg overflow-hidden ${mqc.isOverCommitted ? 'border-amber-300' : 'border-slate-200'}`}>
+                        <div className={`px-4 py-2.5 border-b ${mqc.isOverCommitted ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <span className={`text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${mqc.isOverCommitted ? 'text-amber-700' : 'text-slate-500'}`}>
+                            {mqc.isOverCommitted ? <AlertTriangle className="w-3 h-3" /> : <Tag className="w-3 h-3" />}
+                            {mqc.isOverCommitted ? '⚠ Volume Commitment Exceeded' : `Volume Commitment — ${mqc.periodLabel}`}
+                          </span>
+                        </div>
+                        <div className="px-4 py-3 space-y-2">
+                          <div className="text-xs font-bold text-slate-700">{mqc.used} of {mqc.committed} containers used</div>
+                          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100, mqc.percentUsed)}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span>{mqc.percentUsed}%</span>
+                            {!mqc.isOverCommitted && <span>{mqc.remaining} remaining · Resets: {mqc.resetDate}</span>}
+                          </div>
+                          {mqc.isOverCommitted && (
+                            <div className="text-xs text-amber-700 font-bold bg-amber-50 rounded px-3 py-2 border border-amber-200">
+                              {mqc.used - mqc.committed} containers booked beyond commitment. Confirm if spot rate applies to these.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── RATE ITEMS TABLE ── */}
+              {/* Rate items table */}
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" /> Rate Items
+                </h3>
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                        <th className="px-4 py-2.5 text-left">Container</th>
+                        <th className="px-4 py-2.5 text-left">Route</th>
+                        <th className="px-4 py-2.5 text-right">Base Rate</th>
+                        <th className="px-4 py-2.5 text-right">Return Leg</th>
+                        <th className="px-4 py-2.5 text-right">FAF (Est)</th>
+                        <th className="px-4 py-2.5 text-center">ROT</th>
+                        <th className="px-4 py-2.5 text-right">Total Est.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(selectedQuote.rateItems ?? []).map(ri => (
+                        <tr key={ri.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-mono font-bold text-slate-700">{ri.containerType ?? ri.containerSize}</td>
+                          <td className="px-4 py-2.5 text-slate-600">
+                            {ri.originZoneId
+                              ? `${zones.find(z => z.id === ri.originZoneId)?.code ?? ri.originZoneId} → ${zones.find(z => z.id === ri.destinationZoneId)?.code ?? ri.destinationZoneId}`
+                              : `${locations.find(l => l.id === ri.originLocationId)?.code ?? '—'} → ${locations.find(l => l.id === ri.destinationLocationId)?.code ?? '—'}`
+                            }
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-800">{fmtCurrency(ri.baseRate, ri.currency)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-600">{ri.returnLegRate ? fmtCurrency(ri.returnLegRate, ri.currency) : '—'}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-blue-600">{ri.estimatedFuelSurcharge ? fmtCurrency(ri.estimatedFuelSurcharge, ri.currency) : '—'}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            {ri.rotRequired ? <span className="text-[9px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">Required</span>
+                              : <span className="text-[9px] text-slate-400">No</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-black text-blue-700">{fmtCurrency(ri.totalEstimatedValue ?? ri.baseRate, ri.currency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50 border-t border-slate-200">
+                      <tr>
+                        <td colSpan={6} className="px-4 py-2 text-right text-xs font-bold text-slate-600">Total Estimated Value:</td>
+                        <td className="px-4 py-2 text-right font-mono font-black text-blue-800">{fmtCurrency(selectedQuote.totalValue ?? 0, selectedQuote.currency)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
               </div>
 
-              {/* Installed / Active pricing list */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-500">Negotiated Rate Leg Register ({rates.length})</h4>
-                {rates.length === 0 ? (
-                  <div className="text-center py-6 border border-dashed border-slate-200 bg-slate-50 rounded text-xs text-slate-400 font-sans italic">
-                    Add at least one point-to-point pricing leg to calculate commercial parameters.
+              {/* Surcharges */}
+              {(selectedQuote.rateItems?.[0]?.applicableSurcharges?.length ?? 0) > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                    <Percent className="w-3.5 h-3.5" /> Surcharges
+                  </h3>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                          <th className="px-4 py-2 text-left">Code</th>
+                          <th className="px-4 py-2 text-left">Name</th>
+                          <th className="px-4 py-2 text-left">Method</th>
+                          <th className="px-4 py-2 text-right">Amount</th>
+                          <th className="px-4 py-2 text-center">Type</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(selectedQuote.rateItems?.[0]?.applicableSurcharges ?? []).map(s => (
+                          <tr key={s.surchargeCode} className="hover:bg-slate-50">
+                            <td className="px-4 py-2 font-mono font-bold text-slate-700">{s.surchargeCode}</td>
+                            <td className="px-4 py-2 text-slate-600">{s.surchargeName}</td>
+                            <td className="px-4 py-2 text-slate-400">{s.calculationMethod}</td>
+                            <td className="px-4 py-2 text-right font-mono font-bold text-slate-700">{s.amount}{s.calculationMethod.includes('%') ? '%' : ''}</td>
+                            <td className="px-4 py-2 text-center">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${s.isIncluded ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                {s.isIncluded ? 'Included' : 'Extra'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ) : (
-                  <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[9px] font-extrabold">
-                          <tr>
-                            <th className="px-4 py-2">Scenario</th>
-                            <th className="px-4 py-2">Commercial Route</th>
-                            <th className="px-4 py-2">Container Size</th>
-                            <th className="px-4 py-2 text-right">Base Charge</th>
-                            <th className="px-4 py-2 text-right">Remove</th>
+                </div>
+              )}
+
+              {/* Notes */}
+              <div className="grid grid-cols-2 gap-4">
+                {selectedQuote.internalNotes && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Internal Notes</div>
+                    <p className="text-xs text-slate-600 leading-relaxed">{selectedQuote.internalNotes}</p>
+                  </div>
+                )}
+                {selectedQuote.customerNotes && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1.5">Customer Notes (printed)</div>
+                    <p className="text-xs text-blue-700 leading-relaxed">{selectedQuote.customerNotes}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── CONVERT TO BOOKING PANEL ── */}
+        <AnimatePresence>
+          {convertingQuote && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="absolute inset-0 bg-white z-20 flex flex-col"
+            >
+              <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Convert to Booking</h3>
+                  <p className="text-xs text-slate-500">Converting <span className="font-mono font-bold text-blue-600">{convertingQuote.quoteNo}</span></p>
+                </div>
+                <button onClick={() => setConvertingQuoteId(null)} className="p-1.5 hover:bg-slate-100 rounded">
+                  <X className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Pre-filled from Quotation (locked)</div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div><span className="text-slate-400">Customer:</span> <span className="font-bold text-slate-800">{customers.find(c => c.id === convertingQuote.customerId)?.name}</span></div>
+                    <div><span className="text-slate-400">Scenario:</span> <span className={`font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[convertingQuote.scenario ?? 'IMP']}`}>{convertingQuote.scenario}</span></div>
+                    {(convertingQuote.rateItems ?? [])[0] && <>
+                      <div><span className="text-slate-400">Container Type:</span> <span className="font-mono font-bold text-slate-700">{(convertingQuote.rateItems ?? [])[0].containerType}</span></div>
+                      <div><span className="text-slate-400">Base Rate:</span> <span className="font-bold text-blue-700">{fmtCurrency((convertingQuote.rateItems ?? [])[0].baseRate, (convertingQuote.rateItems ?? [])[0].currency)}</span></div>
+                    </>}
+                  </div>
+                </div>
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                  <div className="text-[10px] font-bold uppercase text-blue-500 tracking-wider flex items-center gap-1.5">
+                    <Info className="w-3 h-3" /> Still required in Booking Form
+                  </div>
+                  <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                    {['Container No & Seal No', 'Shipping Line & Vessel', 'Voyage No & ETA', 'Origin & Destination Locations', 'Target Delivery Date'].map(item => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+                <button onClick={() => setConvertingQuoteId(null)} className="btn-secondary">Cancel</button>
+                <button
+                  onClick={() => {
+                    const ri = (convertingQuote.rateItems ?? [])[0];
+                    onConvertToBooking(convertingQuote.customerId, convertingQuote.id, ri?.id);
+                    setConvertingQuoteId(null);
+                    showToast('Navigating to Booking — quotation pre-filled ✓');
+                  }}
+                  className="btn-primary flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Proceed to Booking Form →
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── CREATE WIZARD ── */}
+        {rightView === 'create' && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* Progress indicator */}
+            <div className="px-6 py-3 border-b border-slate-200 bg-white shrink-0">
+              <div className="flex items-center gap-0">
+                {['Customer & Validity', 'Commercial Terms', 'Routes & Rates', 'Review & Save'].map((label, i) => {
+                  const n = i + 1;
+                  const isActive = step === n;
+                  const isDone = step > n;
+                  return (
+                    <React.Fragment key={n}>
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${isDone ? 'bg-green-500 text-white' : isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                          {isDone ? <Check className="w-3 h-3" /> : n}
+                        </div>
+                        <span className={`text-[11px] font-bold ${isActive ? 'text-blue-700' : isDone ? 'text-green-600' : 'text-slate-400'}`}>{label}</span>
+                      </div>
+                      {i < 3 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 mx-1" />}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+              {clonedFromId && (
+                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                  className="mt-2 text-[10px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-1.5 flex items-center gap-1.5">
+                  <Copy className="w-3 h-3" />
+                  Cloned from <span className="font-mono font-bold">{quotations.find(q => q.id === clonedFromId)?.quoteNo}</span> on {today()}
+                </motion.div>
+              )}
+            </div>
+
+            {/* Step content with slide animation */}
+            <div className="flex-1 overflow-hidden relative">
+              <AnimatePresence mode="wait" custom={stepDir}>
+
+                {/* ── STEP 1: Customer & Validity ── */}
+                {step === 1 && (
+                  <motion.div key="step1" custom={stepDir} variants={stepVariants}
+                    initial="enter" animate="center" exit="exit"
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="absolute inset-0 overflow-y-auto p-6 space-y-4"
+                  >
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <Package className="w-4 h-4 text-blue-500" /> Customer &amp; Validity
+                    </h3>
+
+                    {/* Target customer */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500">Target Customer Account *</label>
+                      <select value={formCustomerId} onChange={e => setFormCustomerId(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400">
+                        <option value="">Select customer...</option>
+                        {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.taxId}</option>)}
+                      </select>
+                      {formCustomerId && (() => {
+                        const c = customers.find(cx => cx.id === formCustomerId);
+                        return c ? (
+                          <div className="text-[10px] text-slate-400 mt-1 flex gap-3">
+                            <span>Tax: <strong className="font-mono">{c.taxId}</strong></span>
+                            <span>Terms: <strong>{c.paymentTerms}</strong></span>
+                            <span>Credit: <strong>{fmtCurrency(c.creditLimit)}</strong></span>
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+
+                    {/* Region badge */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500">Region</label>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-600">
+                          {regions.find(r => r.id === (currentUser.regionId || 'IN'))?.name ?? currentUser.regionId ?? 'IN'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">Auto-assigned from your profile</span>
+                      </div>
+                    </div>
+
+                    {/* Offer valid until */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500">Offer Valid Until *</label>
+                      <input type="date" value={formOfferValidUntil} onChange={e => setFormOfferValidUntil(e.target.value)}
+                        className="w-full text-sm border border-amber-200 bg-amber-50/30 rounded px-3 py-2 focus:outline-none focus:border-amber-400" />
+                      <p className="text-[10px] text-amber-600">Customer must approve this rate by this date, or it expires and needs re-quoting.</p>
+                    </div>
+
+                    {/* Contract validity dates */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500">Contract Start Date *</label>
+                        <input type="date" value={formValidFrom} onChange={e => setFormValidFrom(e.target.value)}
+                          className="w-full text-sm border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500">Contract End Date *</label>
+                        <input type="date" value={formValidTo} onChange={e => setFormValidTo(e.target.value)}
+                          className="w-full text-sm border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                        <p className="text-[10px] text-slate-400">Bookings can be created against this quote until this date.</p>
+                      </div>
+                    </div>
+
+                    {/* Scenario */}
+                    <div className="space-y-2 pt-1">
+                      <label className="text-xs font-bold text-slate-500">Scenario Type *</label>
+                      <div className="flex gap-2 flex-wrap">
+                        {(['IMP', 'EXP', 'Inland', 'EMTY', 'RETURN'] as ScenarioType[]).map(s => (
+                          <button key={s} onClick={() => setFormScenario(s)}
+                            className={`px-3 py-1.5 rounded text-xs font-bold border transition ${formScenario === s ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400">{SCENARIO_DESC[formScenario]}</p>
+                      <div className={`text-[10px] font-bold px-2.5 py-1.5 rounded flex items-center gap-1.5 ${SCENARIO_ROT[formScenario] === 'yes' ? 'bg-green-50 text-green-700 border border-green-200' : SCENARIO_ROT[formScenario] === 'no' ? 'bg-slate-50 text-slate-500 border border-slate-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                        <CheckCircle2 className="w-3 h-3 shrink-0" />
+                        Release Order (ROT): {SCENARIO_ROT[formScenario] === 'yes' ? 'Required ✓' : SCENARIO_ROT[formScenario] === 'no' ? 'Not Required' : 'Conditional'}
+                        {SCENARIO_ROT[formScenario] === 'conditional' && (
+                          <label className="flex items-center gap-1 ml-2 cursor-pointer font-normal">
+                            <input type="checkbox" checked={formEmtyRot} onChange={e => setFormEmtyRot(e.target.checked)} />
+                            Require ROT
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* ── STEP 2: Commercial Terms ── */}
+                {step === 2 && (
+                  <motion.div key="step2" custom={stepDir} variants={stepVariants}
+                    initial="enter" animate="center" exit="exit"
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="absolute inset-0 overflow-y-auto p-6 space-y-5"
+                  >
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <Ship className="w-4 h-4 text-blue-500" /> Commercial Terms
+                    </h3>
+
+                    {/* GROUP 1: Payment & Trade Terms */}
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Tag className="w-3 h-3" /> Payment &amp; Trade Terms
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Payment Terms / Credit</label>
+                          <input type="text" placeholder={customers.find(c => c.id === formCustomerId)?.paymentTerms ?? 'e.g. Net 30 Days'}
+                            value={formPaymentTerms}
+                            onChange={e => setFormPaymentTerms(e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                          <p className="text-[9px] text-slate-400">Leave blank to use customer default</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Freight Responsibility</label>
+                          <select value={formFreightResp} onChange={e => setFormFreightResp(e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400">
+                            <option value="">Select...</option>
+                            <option value="Consignee Pays">Consignee Pays Freight</option>
+                            <option value="Shipper Pays">Shipper Pays Freight</option>
+                            <option value="Third Party Pays">Third Party Pays</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Incoterms — prominent */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                          Incoterms (Rules of Freight)
+                          <button type="button" onClick={() => setShowIncotermTooltip(v => !v)}
+                            className="text-slate-400 hover:text-blue-500 transition">
+                            <HelpCircle className="w-3.5 h-3.5" />
+                          </button>
+                        </label>
+                        <AnimatePresence>
+                          {showIncotermTooltip && (
+                            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                              className="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-[9px] space-y-1">
+                              <div className="font-bold text-blue-800 mb-1.5">Incoterm Guide for Haulage</div>
+                              {INCOTERMS.map(it => (
+                                <div key={it.code} className="grid grid-cols-[3rem_1fr] gap-1">
+                                  <span className="font-mono font-bold text-blue-700">{it.code}</span>
+                                  <span className="text-blue-600">{it.desc}</span>
+                                </div>
+                              ))}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <select value={formIncoterm}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setFormIncoterm(val);
+                            const suggestion = INCOTERMS.find(it => it.code === val)?.freightPays ?? '';
+                            if (suggestion && !formFreightResp) setFormFreightResp(suggestion);
+                          }}
+                          className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400">
+                          <option value="">Select Incoterm...</option>
+                          {INCOTERMS.map(it => <option key={it.code} value={it.code}>{it.label}</option>)}
+                        </select>
+                        {formIncoterm && (
+                          <p className="text-[10px] text-blue-600 bg-blue-50 px-2.5 py-1 rounded border border-blue-100">
+                            {INCOTERMS.find(it => it.code === formIncoterm)?.desc}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* GROUP 2: Volume Commitment */}
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <FileCheck className="w-3 h-3" /> Volume Commitment (MQC)
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Minimum Qty (containers)</label>
+                          <input type="number" placeholder="e.g. 20" value={formMqcVolume}
+                            onChange={e => setFormMqcVolume(e.target.value === '' ? '' : Number(e.target.value))}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Period</label>
+                          <select value={formMqcPeriod} onChange={e => setFormMqcPeriod(e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400">
+                            {['None', 'Monthly', 'Quarterly', 'Annual'].map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* GROUP 3: Special Cargo */}
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3 h-3" /> Special Cargo Profile
+                      </div>
+                      <div className="flex gap-4 flex-wrap">
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 font-bold">
+                          <input type="checkbox" checked={formIsHazmat} onChange={e => { setFormIsHazmat(e.target.checked); if (!e.target.checked) setFormHazmatClass(''); }}
+                            className="rounded" />
+                          Hazardous Cargo (IMDG)
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 font-bold">
+                          <input type="checkbox" checked={formRequiresGenset} onChange={e => setFormRequiresGenset(e.target.checked)} className="rounded" />
+                          Genset Required (Reefer)
+                        </label>
+                      </div>
+                      {formIsHazmat && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Hazmat Class</label>
+                          <select value={formHazmatClass} onChange={e => setFormHazmatClass(e.target.value)}
+                            className="w-full text-xs border border-amber-200 bg-amber-50 rounded px-3 py-2 focus:outline-none focus:border-amber-400">
+                            <option value="">Select hazmat class...</option>
+                            {HAZMAT_CLASSES.map(h => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                        </motion.div>
+                      )}
+                    </div>
+
+                    {/* GROUP 4: Free Time & Detention */}
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" /> Free Time &amp; Detention Policy
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Port Demurrage Free Days</label>
+                          <input type="number" placeholder="e.g. 7" value={formDemurrageFreeDays}
+                            onChange={e => setFormDemurrageFreeDays(e.target.value === '' ? '' : Number(e.target.value))}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                          <p className="text-[9px] text-slate-400">Days at port before demurrage starts</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Demurrage Rate (per day)</label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                            <input type="number" placeholder="e.g. 5000" value={formDemurrageFlatRate}
+                              onChange={e => setFormDemurrageFlatRate(e.target.value === '' ? '' : Number(e.target.value))}
+                              className="w-full pl-6 pr-3 py-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-400" />
+                          </div>
+                          <p className="text-[9px] text-slate-400">Flat rate charged per day over free period</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Warehouse Detention Free Days</label>
+                          <input type="number" placeholder="e.g. 5" value={formDetentionFreeDays}
+                            onChange={e => setFormDetentionFreeDays(e.target.value === '' ? '' : Number(e.target.value))}
+                            className="w-full text-xs border border-slate-200 rounded px-3 py-2 focus:outline-none focus:border-blue-400" />
+                          <p className="text-[9px] text-slate-400">Days at customer site before detention starts</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Detention Rate (per day)</label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                            <input type="number" placeholder="e.g. 3000" value={formDetentionFlatRate}
+                              onChange={e => setFormDetentionFlatRate(e.target.value === '' ? '' : Number(e.target.value))}
+                              className="w-full pl-6 pr-3 py-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-400" />
+                          </div>
+                          <p className="text-[9px] text-slate-400">Flat rate charged per day over free period</p>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* ── STEP 3: Routes & Rates ── */}
+                {step === 3 && (
+                  <motion.div key="step3" custom={stepDir} variants={stepVariants}
+                    initial="enter" animate="center" exit="exit"
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="absolute inset-0 overflow-y-auto p-6 space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-blue-500" /> Routes &amp; Rates
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Each line = one route + container combination</p>
+                      </div>
+                      <button onClick={() => setFormRateItems(prev => [...prev, blankItem()])}
+                        className="shrink-0 flex items-center gap-1 text-[11px] px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition">
+                        <Plus className="w-3 h-3" /> Add Rate Line
+                      </button>
+                    </div>
+
+                    {/* Scenario lock reminder */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                      <span className={`font-bold px-2 py-0.5 rounded ${SCENARIO_COLOR[formScenario]}`}>{formScenario}</span>
+                      <span className="text-slate-500">All rate lines locked to this scenario. Need another? Create a separate quotation.</span>
+                    </div>
+
+                    {formRateItems.length === 0 && (
+                      <div className="text-center py-8 text-slate-400 border border-dashed border-slate-200 rounded-lg">
+                        <Plus className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                        <p className="text-xs italic">No rate lines yet — add at least one.</p>
+                      </div>
+                    )}
+
+                    {formRateItems.map((item, idx) => {
+                      const fafRule = formSurcharges.find(s => s.surchargeCode === 'FAF' && s.enabled);
+                      const base = Number(item.baseRate) || 0;
+                      const ret = Number(item.returnLegRate) || 0;
+                      const faf = fafRule && base > 0 ? Math.round(base * fafRule.amount / 100) : 0;
+                      const total = base + ret + faf;
+                      return (
+                        <div key={item.id} className="border border-slate-200 rounded-lg p-4 bg-white space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${SCENARIO_COLOR[formScenario]}`}>{formScenario}</span>
+                              Rate Line #{idx + 1}
+                            </span>
+                            {formRateItems.length > 1 && (
+                              <button onClick={() => setFormRateItems(prev => prev.filter(x => x.id !== item.id))}
+                                className="p-1 text-red-400 hover:text-red-600 rounded hover:bg-red-50 transition">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            {/* Container/Size */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                <Package className="w-2.5 h-2.5" /> Container / Size
+                              </label>
+                              <select value={item.containerTypeId}
+                                onChange={e => setFormRateItems(prev => prev.map(x => x.id === item.id ? { ...x, containerTypeId: e.target.value, tariffLoadedMsg: '' } : x))}
+                                className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 focus:outline-none">
+                                <option value="">Select...</option>
+                                {containerTypes.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
+                              </select>
+                            </div>
+                            {/* Route type */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase">Route Type</label>
+                              <div className="flex gap-1">
+                                {(['Zone-based', 'Point-to-point'] as const).map(rt => (
+                                  <button key={rt} onClick={() => setFormRateItems(prev => prev.map(x => x.id === item.id ? { ...x, useZone: rt === 'Zone-based' } : x))}
+                                    className={`flex-1 text-[10px] font-bold py-1.5 rounded border transition ${item.useZone === (rt === 'Zone-based') ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                    {rt}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {/* Origin node */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                <MapPin className="w-2.5 h-2.5" /> Origin {item.useZone ? 'Zone' : 'Location'}
+                              </label>
+                              <select value={item.useZone ? item.originZoneId : item.originLocationId}
+                                onChange={e => setFormRateItems(prev => prev.map(x => x.id === item.id
+                                  ? { ...x, ...(item.useZone ? { originZoneId: e.target.value } : { originLocationId: e.target.value }), tariffLoadedMsg: '' } : x))}
+                                className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 focus:outline-none">
+                                <option value="">Select...</option>
+                                {item.useZone
+                                  ? zones.map(z => <option key={z.id} value={z.id}>{z.name} ({z.code})</option>)
+                                  : locations.map(l => <option key={l.id} value={l.id}>{l.name} [{l.code}]</option>)}
+                              </select>
+                            </div>
+                            {/* Destination node */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                <MapPin className="w-2.5 h-2.5" /> Destination {item.useZone ? 'Zone' : 'Location'}
+                              </label>
+                              <select value={item.useZone ? item.destinationZoneId : item.destinationLocationId}
+                                onChange={e => setFormRateItems(prev => prev.map(x => x.id === item.id
+                                  ? { ...x, ...(item.useZone ? { destinationZoneId: e.target.value } : { destinationLocationId: e.target.value }), tariffLoadedMsg: '' } : x))}
+                                className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 focus:outline-none">
+                                <option value="">Select...</option>
+                                {item.useZone
+                                  ? zones.map(z => <option key={z.id} value={z.id}>{z.name} ({z.code})</option>)
+                                  : locations.map(l => <option key={l.id} value={l.id}>{l.name} [{l.code}]</option>)}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Load from tariff */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const rate = loadTariff(item);
+                                setFormRateItems(prev => prev.map(x => x.id === item.id
+                                  ? { ...x, baseRate: rate ?? x.baseRate, tariffLoadedMsg: rate !== null ? `Loaded ✓ (${fmtCurrency(rate)})` : 'No matching tariff' } : x));
+                              }}
+                              className="text-[10px] px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded font-bold text-slate-600 transition flex items-center gap-1"
+                            >
+                              <RefreshCw className="w-2.5 h-2.5" /> ↓ Load from Tariff Card
+                            </button>
+                            {item.tariffLoadedMsg && (
+                              <span className={`text-[10px] font-bold ${item.tariffLoadedMsg.includes('✓') ? 'text-green-600' : 'text-amber-600'}`}>
+                                {item.tariffLoadedMsg}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            {/* Base charge */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase">Base Charge</label>
+                              <div className="relative">
+                                <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                                <input type="number" placeholder="0" value={item.baseRate}
+                                  onChange={e => setFormRateItems(prev => prev.map(x => x.id === item.id ? { ...x, baseRate: e.target.value === '' ? '' : Number(e.target.value) } : x))}
+                                  className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-400" />
+                              </div>
+                              <p className="text-[9px] text-slate-400">Per trip, excl. surcharges</p>
+                            </div>
+                            {/* Return leg — IMP/EXP only */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                <RotateCcw className="w-2.5 h-2.5" /> Return Leg Rate
+                                {!['IMP', 'EXP'].includes(formScenario) && <span className="text-slate-300 font-normal">(N/A)</span>}
+                              </label>
+                              <div className="relative">
+                                <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                                <input type="number" placeholder="0" value={item.returnLegRate}
+                                  disabled={!['IMP', 'EXP'].includes(formScenario)}
+                                  onChange={e => setFormRateItems(prev => prev.map(x => x.id === item.id ? { ...x, returnLegRate: e.target.value === '' ? '' : Number(e.target.value) } : x))}
+                                  className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-300" />
+                              </div>
+                              {formScenario === 'IMP' && <p className="text-[9px] text-slate-400">Empty return to depot</p>}
+                            </div>
+                          </div>
+
+                          {/* Live calc */}
+                          {base > 0 && (
+                            <div className="flex items-center gap-3 px-3 py-2 bg-blue-50 rounded border border-blue-100 text-xs">
+                              {faf > 0 && <span className="text-blue-500 flex items-center gap-1"><Percent className="w-3 h-3" /> FAF (est.): <strong>{fmtCurrency(faf)}</strong></span>}
+                              <span className="text-blue-800 font-black ml-auto flex items-center gap-1"><ArrowRight className="w-3 h-3" /> Line Total: {fmtCurrency(total)}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Running total */}
+                    {formRateItems.some(i => Number(i.baseRate) > 0) && (
+                      <div className="p-3 bg-slate-800 text-white rounded-lg flex items-center justify-between text-xs">
+                        <span className="text-slate-300">Total Estimated Contract Value</span>
+                        <span className="font-black text-base">
+                          {fmtCurrency(formRateItems.reduce((sum, item) => {
+                            const base = Number(item.baseRate) || 0;
+                            const ret = Number(item.returnLegRate) || 0;
+                            const fafRule = formSurcharges.find(s => s.surchargeCode === 'FAF' && s.enabled);
+                            const faf = fafRule && base > 0 ? Math.round(base * fafRule.amount / 100) : 0;
+                            return sum + base + ret + faf;
+                          }, 0))}
+                        </span>
+                        <span className="text-slate-400">across {formRateItems.length} rate line{formRateItems.length !== 1 ? 's' : ''}</span>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* ── STEP 4: Review & Save ── */}
+                {step === 4 && (
+                  <motion.div key="step4" custom={stepDir} variants={stepVariants}
+                    initial="enter" animate="center" exit="exit"
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="absolute inset-0 overflow-y-auto p-6 space-y-4"
+                  >
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-blue-500" /> Review &amp; Save
+                    </h3>
+
+                    {/* Section 1 summary */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><Package className="w-3 h-3" /> Customer &amp; Validity</span>
+                        <button onClick={() => { setStepDir(-1); setStep(1); }} className="text-[9px] text-blue-500 hover:underline font-bold">Edit</button>
+                      </div>
+                      <div className="px-4 py-3 grid grid-cols-3 gap-3 text-xs">
+                        <div><span className="text-slate-400">Customer:</span> <strong>{customers.find(c => c.id === formCustomerId)?.name ?? '—'}</strong></div>
+                        <div><span className="text-slate-400">Scenario:</span> <span className={`font-bold px-1.5 py-0.5 rounded ${SCENARIO_COLOR[formScenario]}`}>{formScenario}</span></div>
+                        <div><span className="text-slate-400">Valid:</span> <span className="font-mono">{formValidFrom} → {formValidTo}</span></div>
+                        <div><span className="text-slate-400">ROT:</span> <strong>{SCENARIO_ROT[formScenario] === 'yes' ? 'Required' : SCENARIO_ROT[formScenario] === 'no' ? 'Not Required' : formEmtyRot ? 'Required' : 'Not Required'}</strong></div>
+                      </div>
+                    </div>
+
+                    {/* Section 2 summary */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><Ship className="w-3 h-3" /> Commercial Terms</span>
+                        <button onClick={() => { setStepDir(-1); setStep(2); }} className="text-[9px] text-blue-500 hover:underline font-bold">Edit</button>
+                      </div>
+                      <div className="px-4 py-3 grid grid-cols-2 gap-2 text-xs">
+                        {formIncoterm && <div><span className="text-slate-400">Incoterm:</span> <strong className="font-mono">{formIncoterm}</strong></div>}
+                        {formFreightResp && <div><span className="text-slate-400">Freight:</span> <strong>{formFreightResp}</strong></div>}
+                        {formPaymentTerms && <div><span className="text-slate-400">Payment:</span> <strong>{formPaymentTerms}</strong></div>}
+                        {formMqcVolume !== '' && formMqcPeriod !== 'None' && <div><span className="text-slate-400">MQC:</span> <strong>{formMqcVolume} containers / {formMqcPeriod}</strong></div>}
+                        {formIsHazmat && <div><span className="text-slate-400">Hazmat:</span> <strong className="text-red-600">{formHazmatClass || 'Yes'}</strong></div>}
+                        {formRequiresGenset && <div><span className="text-slate-400">Genset:</span> <strong>Required</strong></div>}
+                        {formDemurrageFreeDays !== '' && <div><span className="text-slate-400">Demurrage:</span> <strong>{formDemurrageFreeDays}d free{formDemurrageFlatRate !== '' ? ` @ ${fmtCurrency(Number(formDemurrageFlatRate))}/d` : ''}</strong></div>}
+                        {formDetentionFreeDays !== '' && <div><span className="text-slate-400">Detention:</span> <strong>{formDetentionFreeDays}d free{formDetentionFlatRate !== '' ? ` @ ${fmtCurrency(Number(formDetentionFlatRate))}/d` : ''}</strong></div>}
+                        {!formIncoterm && !formFreightResp && !formPaymentTerms && <div className="col-span-2 text-slate-400 italic">No commercial terms set — defaults apply.</div>}
+                      </div>
+                    </div>
+
+                    {/* Section 3 summary */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><MapPin className="w-3 h-3" /> Routes &amp; Rates</span>
+                        <button onClick={() => { setStepDir(-1); setStep(3); }} className="text-[9px] text-blue-500 hover:underline font-bold">Edit</button>
+                      </div>
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50/60">
+                          <tr className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">
+                            <th className="px-4 py-2 text-left">Container</th>
+                            <th className="px-4 py-2 text-right">Base</th>
+                            <th className="px-4 py-2 text-right">Return</th>
+                            <th className="px-4 py-2 text-center">ROT</th>
+                            <th className="px-4 py-2 text-right">Total</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100 text-xs font-sans text-slate-600">
-                          {rates.map((rateLine, index) => {
-                            const fromL = locations.find(l => l.id === rateLine.fromLocationId);
-                            const toL = locations.find(l => l.id === rateLine.toLocationId);
+                        <tbody className="divide-y divide-slate-100">
+                          {formRateItems.map(item => {
+                            const ct = containerTypes.find(c => c.id === item.containerTypeId);
+                            const base = Number(item.baseRate) || 0;
+                            const ret = Number(item.returnLegRate) || 0;
+                            const fafRule = formSurcharges.find(s => s.surchargeCode === 'FAF' && s.enabled);
+                            const faf = fafRule && base > 0 ? Math.round(base * fafRule.amount / 100) : 0;
+                            const rot = SCENARIO_ROT[formScenario] === 'yes' ? true : SCENARIO_ROT[formScenario] === 'no' ? false : formEmtyRot;
                             return (
-                              <tr key={rateLine.id} className="hover:bg-slate-50/40 transition-colors">
-                                <td className="px-4 py-2.5 whitespace-nowrap">
-                                  <span className="font-mono bg-blue-50 text-blue-700 font-extrabold px-1.5 py-0.5 rounded text-[9px] border border-blue-100">
-                                    {rateLine.scenario}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2.5 font-bold text-slate-800">
-                                  <span title={fromL?.name}>{fromL?.code || 'Unknown'}</span>
-                                  <span className="text-slate-400 mx-1.5">➔</span>
-                                  <span title={toL?.name}>{toL?.code || 'Unknown'}</span>
-                                </td>
-                                <td className="px-4 py-2.5 whitespace-nowrap font-mono text-[11px] text-slate-500 font-semibold">
-                                  {rateLine.containerSize}
-                                </td>
-                                <td className="px-4 py-2.5 text-right whitespace-nowrap font-mono font-black text-slate-900">
-                                  ${rateLine.baseRate}.00
-                                </td>
-                                <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                                  <button
-                                    id={`remove-draft-line-${rateLine.id}`}
-                                    type="button"
-                                    onClick={() => handleRemoveRateLine(rateLine.id)}
-                                    className="text-slate-400 hover:text-red-650 hover:bg-slate-100 p-1 rounded transition text-red-500"
-                                    title="Delete line"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 mx-auto" />
-                                  </button>
-                                </td>
+                              <tr key={item.id}>
+                                <td className="px-4 py-2 font-mono font-bold">{ct?.code ?? '—'}</td>
+                                <td className="px-4 py-2 text-right">{fmtCurrency(base)}</td>
+                                <td className="px-4 py-2 text-right">{ret ? fmtCurrency(ret) : '—'}</td>
+                                <td className="px-4 py-2 text-center">{rot ? <Check className="w-3 h-3 text-green-600 mx-auto" /> : <span className="text-slate-300">—</span>}</td>
+                                <td className="px-4 py-2 text-right font-bold text-blue-700">{fmtCurrency(base + ret + faf)}</td>
                               </tr>
                             );
                           })}
                         </tbody>
+                        <tfoot className="border-t border-slate-200 bg-slate-50">
+                          <tr>
+                            <td colSpan={4} className="px-4 py-2 text-right text-xs font-bold text-slate-600">Total:</td>
+                            <td className="px-4 py-2 text-right font-black text-blue-800">
+                              {fmtCurrency(formRateItems.reduce((s, item) => {
+                                const base = Number(item.baseRate) || 0;
+                                const ret = Number(item.returnLegRate) || 0;
+                                const fafRule = formSurcharges.find(x => x.surchargeCode === 'FAF' && x.enabled);
+                                return s + base + ret + (fafRule && base > 0 ? Math.round(base * fafRule.amount / 100) : 0);
+                              }, 0))}
+                            </td>
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
-                  </div>
-                )}
-              </div>
 
-              {/* Surcharge configs checkboxes */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-500 border-b border-slate-150 pb-1.5 flex items-center justify-between">
-                  <span>Authorized Auxiliary Surcharges</span>
-                  <span className="text-[10px] font-mono text-slate-400">Auto-billed on demand</span>
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {SURCHARGE_CATALOG.map((sch) => {
-                    const active = selectedSurchargeCodes.includes(sch.code);
-                    const currentVal = surchargeOverrides[sch.code] ?? sch.amount;
-                    return (
-                      <div 
-                        key={sch.code}
-                        onClick={() => {
-                          setSelectedSurchargeCodes(prev => 
-                            prev.includes(sch.code) 
-                              ? prev.filter(c => c !== sch.code)
-                              : [...prev, sch.code]
-                          );
-                        }}
-                        className={`p-3 rounded-lg border text-xs cursor-pointer select-none flex items-start gap-2.5 transition ${
-                          active 
-                            ? 'bg-blue-50/60 border-blue-200 text-slate-800 font-semibold' 
-                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50'
-                        }`}
-                      >
-                        <div className={`mt-1.5 w-3.5 h-3.5 rounded border border-slate-300 flex items-center justify-center transition shrink-0 ${
-                          active ? 'bg-blue-600 border-blue-600' : 'bg-white'
-                        }`}>
-                          {active && <Check className="w-2.5 h-2.5 text-white stroke-[4px]" />}
-                        </div>
-                        <div className="space-y-1.5 flex-1 min-w-0">
-                          <div className="font-bold text-slate-700 truncate" title={sch.name}>{sch.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            Standard: ${sch.amount} • {sch.calculationMethod}
-                          </div>
-                          
-                          {/* Surcharge Amount Override Input Field */}
-                          <div className="pt-1 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                            <span className="text-[10px] text-slate-500 font-medium">Contract Rate ($):</span>
-                            <input
-                              type="number"
-                              min="0"
-                              value={currentVal}
-                              disabled={!active}
-                              onChange={(e) => {
-                                const val = e.target.value === '' ? '' : Number(e.target.value);
-                                setSurchargeOverrides(prev => ({
-                                  ...prev,
-                                  [sch.code]: val === '' ? 0 : val
-                                }));
-                              }}
-                              className={`w-16 px-1.5 py-0.5 rounded border text-[11px] font-mono font-bold transition-all ${
-                                active 
-                                  ? 'bg-white border-blue-300 text-blue-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/10' 
-                                  : 'bg-slate-100/60 border-slate-200 text-slate-400 cursor-not-allowed'
-                              }`}
-                            />
-                            {active && currentVal !== sch.amount && (
-                              <span className="text-[8px] bg-amber-100 text-amber-800 border border-amber-250 font-sans px-1 rounded font-extrabold uppercase scale-90 shrink-0">
-                                Overridden
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                    {/* Notes */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500">Internal Notes</label>
+                        <textarea rows={3} value={formInternalNotes} onChange={e => setFormInternalNotes(e.target.value)}
+                          placeholder="Not visible to customer..."
+                          className="w-full text-xs border border-slate-200 rounded p-2.5 resize-none focus:outline-none focus:border-blue-400 bg-slate-50" />
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500">Customer-Facing Notes <span className="text-blue-500">(printed on PDF)</span></label>
+                        <textarea rows={3} value={formCustomerNotes} onChange={e => setFormCustomerNotes(e.target.value)}
+                          placeholder="Visible to customer..."
+                          className="w-full text-xs border border-blue-200 rounded p-2.5 resize-none focus:outline-none focus:border-blue-400 bg-blue-50/30" />
+                      </div>
+                    </div>
 
-              {/* Notes Context and Terms */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500">Logistics Caveats & Special Clauses (Pre-Invoice Contract Notes)</label>
-                <textarea
-                  placeholder="Insert custom demurrage terms, extended chassis hold over clauses, free hours at customer site restrictions, etc."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-xs text-slate-800 font-sans focus:outline-none focus:border-blue-500 h-20 leading-relaxed transition-all"
-                />
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex justify-between items-center border-t border-slate-100 pt-5">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('directory')}
-                  className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-bold transition-colors"
-                >
-                  Cancel proposal
-                </button>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleSaveQuotation('draft')}
-                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 bg-white text-slate-705 font-bold rounded text-xs transition"
-                  >
-                    Save Draft Proposal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSaveQuotation('confirmed')}
-                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition shadow-sm shadow-blue-100"
-                  >
-                    Confirm & Publish Contract
-                  </button>
-                </div>
-              </div>
-
+                    {/* Save buttons */}
+                    <div className="flex gap-3 pt-1">
+                      <button onClick={() => handleSave('draft')}
+                        className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold rounded transition">
+                        Save as Draft
+                      </button>
+                      {isManager && (
+                        <button onClick={() => {
+                          const err = validateStep(1) ?? validateStep(3);
+                          if (err) { showToast(err, 'error'); return; }
+                          const regionId = currentUser.regionId || 'IN';
+                          const fafToggle = formSurcharges.find(s => s.surchargeCode === 'FAF' && s.enabled);
+                          const rateItems: QuotationRateItem[] = formRateItems.map(item => {
+                            const ct = containerTypes.find(c => c.id === item.containerTypeId);
+                            const base = Number(item.baseRate) || 0;
+                            const ret = Number(item.returnLegRate) || 0;
+                            const faf = fafToggle ? Math.round(base * fafToggle.amount / 100) : 0;
+                            const rot = SCENARIO_ROT[formScenario] === 'yes' ? true : SCENARIO_ROT[formScenario] === 'no' ? false : formEmtyRot;
+                            return { id: item.id, containerType: ct?.code ?? '', containerTypeId: item.containerTypeId, containerSize: ct?.code, originZoneId: item.useZone ? item.originZoneId : undefined, destinationZoneId: item.useZone ? item.destinationZoneId : undefined, originLocationId: !item.useZone ? item.originLocationId : undefined, destinationLocationId: !item.useZone ? item.destinationLocationId : undefined, baseRate: base, currency: 'INR', returnLegRate: ret, estimatedFuelSurcharge: faf, applicableSurcharges: formSurcharges.filter(s => s.enabled).map(s => ({ surchargeCode: s.surchargeCode, surchargeName: s.surchargeName, amount: s.amount, calculationMethod: s.calculationMethod, isIncluded: s.isIncluded })), totalEstimatedValue: base + ret + faf, rotRequired: rot, notes: '' };
+                          });
+                          const quoteNo = generateQuoteNo(regionId);
+                          const q: Quotation = { id: `quote-${Date.now()}`, quoteNo, regionId, customerId: formCustomerId, scenario: formScenario, status: 'confirmed', validFrom: formValidFrom, validTo: formValidTo, rateItems, totalValue: rateItems.reduce((s, r) => s + (r.totalEstimatedValue ?? 0), 0), currency: 'INR', internalNotes: formInternalNotes, customerNotes: formCustomerNotes, createdBy: currentUser.id, confirmedBy: currentUser.id, confirmedAt: new Date().toISOString(), clonedFromId: clonedFromId ?? undefined, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), paymentTermsOverride: formPaymentTerms || undefined, incoterm: formIncoterm || undefined, freightResponsibility: formFreightResp || undefined, mqcVolume: formMqcVolume !== '' ? Number(formMqcVolume) : undefined, mqcPeriod: formMqcPeriod !== 'None' ? formMqcPeriod : undefined, isHazmatOnly: formIsHazmat || undefined, hazmatClass: formHazmatClass || undefined, requiresGenset: formRequiresGenset || undefined, demurrageFreeDays: formDemurrageFreeDays !== '' ? Number(formDemurrageFreeDays) : undefined, demurrageFlatRate: formDemurrageFlatRate !== '' ? Number(formDemurrageFlatRate) : undefined, detentionFreeDays: formDetentionFreeDays !== '' ? Number(formDetentionFreeDays) : undefined, detentionFlatRate: formDetentionFlatRate !== '' ? Number(formDetentionFlatRate) : undefined };
+                          onAddQuotation(q);
+                          onIncrementQuoteSequence(regionId);
+                          showToast(`${quoteNo} saved and confirmed ✓`);
+                          setSelectedQuoteId(q.id);
+                          setRightView('detail');
+                        }}
+                        className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded transition flex items-center justify-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4" /> Save &amp; Confirm
+                        </button>
+                      )}
+                      <button onClick={() => handleSave('pending_approval')}
+                        className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded transition">
+                        Save &amp; Submit for Approval
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
+            {/* Wizard footer nav */}
+            <div className="shrink-0 px-6 py-3 border-t border-slate-200 bg-white flex items-center justify-between">
+              <button
+                onClick={() => {
+                  if (step === 1) { setRightView(selectedQuoteId ? 'detail' : 'empty'); return; }
+                  goBack();
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-slate-500 hover:text-slate-700 text-sm font-bold transition"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> {step === 1 ? 'Cancel' : 'Back'}
+              </button>
+              <span className="text-[11px] text-slate-400">{step} of 4</span>
+              {step < 4 && (
+                <button onClick={handleNext}
+                  className="flex items-center gap-1 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded transition">
+                  Next <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {step === 4 && <div />}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-full text-sm font-bold shadow-xl z-50 flex items-center gap-2 ${toast.type === 'success' ? 'bg-slate-900 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <AlertCircle className="w-4 h-4 text-white" />}
+            {toast.msg}
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Point 4: Interactive Proposal PDF / Print Preview Sheet Modal */}
-      {previewQuote && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto no-print animate-fade-in">
-          {/* Custom Print Stylesheet to hide surrounding elements and isolate invoice during system print */}
-          <style dangerouslySetInnerHTML={{ __html: `
-            @media print {
-              body > div:not(.z-50) {
-                display: none !important;
-              }
-              body {
-                background: white !important;
-                padding: 0 !important;
-                margin: 0 !important;
-              }
-              .no-print {
-                display: none !important;
-              }
-              .print-container {
-                border: none !important;
-                box-shadow: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                max-height: none !important;
-                overflow: visible !important;
-                width: 100% !important;
-              }
-            }
-          `}} />
-
-          <div className="bg-white border border-slate-250 shadow-2xl rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col font-sans print-container">
-            {/* Modal Header Actions (Hidden in Print) */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 no-print">
-               <div className="flex items-center gap-2">
-                 <Award className="w-5 h-5 text-blue-600" />
-                 <h3 className="text-sm font-bold text-slate-800">Commercial Proposal Print Preview</h3>
-               </div>
-               <div className="flex items-center gap-2">
-                 <button
-                   type="button"
-                   onClick={() => window.print()}
-                   className="px-4 py-1.8 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold flex items-center gap-1.5 transition shadow shadow-blue-100"
-                 >
-                   <Printer className="w-3.5 h-3.5" /> Print / Save PDF
-                 </button>
-                 <button
-                   type="button"
-                   onClick={() => setPreviewQuote(null)}
-                   className="px-3 py-1.8 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded text-xs font-semibold transition"
-                 >
-                   Close Preview
-                 </button>
-               </div>
-            </div>
-
-            {/* Official Letterhead Document Sheet */}
-            <div className="p-8 sm:p-10 space-y-6 flex-1 text-slate-700 leading-normal">
-               
-               {/* 1. Header Corporate Badge */}
-               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-2 border-blue-600 pb-5 gap-4">
-                 <div>
-                   <h1 className="text-xl font-black text-slate-905 tracking-tight font-sans uppercase">
-                     Globelink Drayage & Ports Co.
-                   </h1>
-                   <p className="text-xs text-slate-400 font-mono mt-1">Intermodal Transport • Container Haulage • Wharf Logistics</p>
-                   <p className="text-[10px] text-slate-400 mt-0.5">Unit 406A-E, East Terminal, Wharfside Logistics Blvd, Port Area</p>
-                 </div>
-                 <div className="text-right sm:text-right text-xs">
-                   <div className="bg-blue-605 bg-blue-600 text-white px-3 py-1 text-[11px] font-black tracking-widest font-mono rounded inline-block uppercase">
-                     Commercial Proposal
-                   </div>
-                   <p className="text-slate-900 font-mono font-bold mt-2 text-sm">{previewQuote.quoteNo}</p>
-                   {previewQuote.version !== undefined && previewQuote.version > 0 && (
-                     <p className="text-amber-600 font-bold text-[10px] uppercase font-mono mt-0.5">Amendment Revision {previewQuote.version}</p>
-                   )}
-                 </div>
-               </div>
-
-               {/* 2. Stakeholders & Agreement Timelines */}
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/75 border border-slate-200/85 p-5 rounded-lg text-xs leading-relaxed">
-                 <div className="space-y-1">
-                   <div className="text-[10px] uppercase font-black tracking-wider text-slate-400">Target Client Account</div>
-                   <h4 className="text-sm font-extrabold text-slate-900">
-                     {(() => {
-                       const c = customers.find(item => item.id === previewQuote.customerId);
-                       return c ? c.name : 'Unknown Customer';
-                     })()}
-                   </h4>
-                   <p className="text-[11px] text-slate-505">
-                     Tax Identifier Number: {(() => {
-                       const c = customers.find(item => item.id === previewQuote.customerId);
-                       return c ? c.taxId : 'N/A';
-                     })()}
-                   </p>
-                   <p className="text-[11px] text-slate-505">Commercial Credit Term Limit: <strong className="text-slate-800">{previewQuote.paymentTermsOverride || 'Net 30 Days'}</strong></p>
-                    {previewQuote.incoterm && (
-                      <p className="text-[11px] text-slate-505">
-                        Incoterms Rule: <span className="font-extrabold text-blue-700 font-mono bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">{previewQuote.incoterm}</span>
-                        <span className="text-slate-400 font-normal"> (Rules of Freight Responsibility)</span>
-                      </p>
-                    )}
-                    {previewQuote.freightResponsibility && (
-                      <p className="text-[11px] text-slate-505">
-                        Freight Payment Class: <strong className="text-slate-800">{previewQuote.freightResponsibility === 'Consignee' ? 'Collect (Consignee pays carrier)' : previewQuote.freightResponsibility === 'Shipper' ? 'Prepaid (Shipper pays carrier)' : 'Third-Party Logistics (3PL)'}</strong>
-                      </p>
-                    )}
-                 </div>
-                 <div className="space-y-1.5 md:border-l md:border-slate-200 md:pl-6">
-                   <div className="text-[10px] uppercase font-black tracking-wider text-slate-400">Contract Timeline Parameters</div>
-                   <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                     <span>Effective Date:</span>
-                     <span className="font-mono text-blue-700">{previewQuote.effectiveDate}</span>
-                   </div>
-                   <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                     <span>Expiration Date:</span>
-                     <span className="font-mono text-red-600">{previewQuote.expiryDate}</span>
-                   </div>
-                   {previewQuote.mqcVolume !== undefined && (
-                     <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 text-[11px]">
-                       <span className="font-semibold text-slate-500">Min Quantity Commitment (MQC):</span>
-                       <strong className="text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100">{previewQuote.mqcVolume} Containers / {previewQuote.mqcPeriod}</strong>
-                     </div>
-                   )}
-                 </div>
-               </div>
-
-               {/* 3. Leg Pricing Lines Table */}
-               <div className="space-y-2">
-                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
-                   Schedule I — Point-to-Point Base Carriage Tariff Rates
-                 </h4>
-                 <div className="border border-slate-200 rounded-lg overflow-hidden">
-                   <table className="w-full text-left text-xs">
-                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[9px] font-extrabold">
-                       <tr>
-                         <th className="px-4 py-2.5">Flow Scenario</th>
-                         <th className="px-4 py-2.5">Origin Dispatch Node</th>
-                         <th className="px-4 py-2.5">Destination Delivery Node</th>
-                         <th className="px-4 py-2.5">Container Spec</th>
-                         <th className="px-4 py-2.5 text-right">Carriage Rate (Base Fee)</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-105 font-medium">
-                       {previewQuote.rates.map((rate, rIdx) => {
-                         const fromLoc = locations.find(l => l.id === rate.fromLocationId);
-                         const toLoc = locations.find(l => l.id === rate.toLocationId);
-                         return (
-                           <tr key={rate.id || rIdx} className="hover:bg-slate-50/20">
-                             <td className="px-4 py-2 text-blue-750 font-bold font-mono text-[10px]">{rate.scenario}</td>
-                             <td className="px-4 py-2 font-semibold text-slate-800">{fromLoc ? `${fromLoc.name} (${fromLoc.zone})` : rate.fromLocationId}</td>
-                             <td className="px-4 py-2 font-semibold text-slate-800">{toLoc ? `${toLoc.name} (${toLoc.zone})` : rate.toLocationId}</td>
-                             <td className="px-4 py-2 font-mono text-[11px] text-slate-500 font-bold">{rate.containerSize}</td>
-                             <td className="px-4 py-2 font-mono text-right text-slate-900 font-black">${rate.baseRate.toFixed(2)}</td>
-                           </tr>
-                         );
-                       })}
-                     </tbody>
-                   </table>
-                 </div>
-               </div>
-
-               {/* 4. Authorized Auxiliary Surcharges Table */}
-               <div className="space-y-2">
-                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
-                   Schedule II — Authorized Auxiliary Surcharges & Accessorial Valuation
-                 </h4>
-                 <div className="border border-slate-200 rounded-lg overflow-hidden">
-                   <table className="w-full text-left text-xs">
-                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[9px] font-extrabold">
-                       <tr>
-                         <th className="px-4 py-2.5">Code</th>
-                         <th className="px-4 py-2.5 font-sans">Surcharge / Accessorial Category Description</th>
-                         <th className="px-4 py-2.5">Trigger Condition</th>
-                         <th className="px-4 py-2.5 text-right">Agreement Price (Negotiated)</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-105 font-medium">
-                       {previewQuote.surcharges.map((sur, sIdx) => {
-                         const originalSurcharge = SURCHARGE_CATALOG.find(orig => orig.code === sur.code);
-                         const isOverridden = originalSurcharge && originalSurcharge.amount !== sur.amount;
-                         return (
-                           <tr key={sur.code || sIdx} className="hover:bg-slate-50/20">
-                             <td className="px-4 py-2 font-mono text-[10px] font-bold text-slate-800">{sur.code}</td>
-                             <td className="px-4 py-2 text-slate-600">{sur.name} ({sur.unit})</td>
-                             <td className="px-4 py-2 font-semibold text-[10px] text-slate-400">{sur.autoTrigger}</td>
-                             <td className="px-4 py-2 text-right">
-                               <div className="inline-flex items-center gap-1 justify-end font-mono">
-                                 {isOverridden && (
-                                   <span className="text-[8px] font-sans font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1 rounded uppercase mr-1.5 shrink-0 scale-90">
-                                     Negotiated
-                                   </span>
-                                 )}
-                                 <span className={isOverridden ? 'font-black text-amber-800' : 'font-semibold text-slate-800'}>
-                                   ${sur.amount.toFixed(2)}
-                                 </span>
-                               </div>
-                             </td>
-                           </tr>
-                         );
-                       })}
-                     </tbody>
-                   </table>
-                 </div>
-               </div>
-
-               
-               
-                {/* Schedule III — Demurrage & Detention Free-Time Policies */}
-                <div className="space-y-2 mb-6">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
-                    Schedule III — Demurrage & Detention Free-Time Policies
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border border-slate-200 rounded-lg p-4 bg-slate-50/50 text-xs">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900 border-b border-slate-200 pb-1.5 mb-1.5 font-sans">
-                        <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Port Demurrage Rule</span>
-                      </div>
-                      <p className="text-slate-605 font-sans leading-normal">
-                        The client is granted exactly <strong className="text-blue-700">{previewQuote.demurrageFreeDays !== undefined ? previewQuote.demurrageFreeDays : 7} calendar days</strong> of free time at ocean terminals/port yards. 
-                      </p>
-                      <p className="text-[11px] text-slate-400 italic font-sans mt-1">
-                        Thereafter, a storage surcharge of <strong className="text-slate-705">${previewQuote.demurrageFlatRate !== undefined ? previewQuote.demurrageFlatRate : 150} per day</strong> shall be applied automatically.
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900 border-b border-slate-200 pb-1.5 mb-1.5 font-sans">
-                        <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Warehouse Detention Rule</span>
-                      </div>
-                      <p className="text-slate-605 font-sans leading-normal">
-                        The client is granted exactly <strong className="text-blue-700">{previewQuote.detentionFreeDays !== undefined ? previewQuote.detentionFreeDays : 5} calendar days</strong> of free trailer chassis retention at their private warehouses. 
-                      </p>
-                      <p className="text-[11px] text-slate-500 italic font-sans mt-1">
-                        Thereafter, a chassis holding fee of <strong className="text-slate-705">${previewQuote.detentionFlatRate !== undefined ? previewQuote.detentionFlatRate : 150} per day</strong> shall be assessed and included in the trip invoice.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-
-
-                                  <div className="space-y-4 pt-4 border-t border-slate-200">
-
-
-
-                    <div className="space-y-1.5">
-                    <div className="text-[10px] uppercase font-black tracking-wider text-slate-400">Legal Standard Freight Carriage Terms</div>
-                   <p className="text-[10px] text-slate-400 leading-relaxed text-justify font-sans">
-                     All transportation services rendered hereunder are subject exclusively to the Globelink drayage standard Terms of Carriage. Demurrage free-time at customer depot is locked at exactly 3 hours per event, after which waiting detention rates apply at $80.00/hour. Base fuel pricing index adjustments are calculated on the first Monday of each operational calendar month based on state petroleum guidelines. Quoted pricing excludes direct customs entry fees, terminal handling storage expenses, or broker clearance charges.
-                   </p>
-                 </div>
-
-                 {previewQuote.notes && (
-                   <div className="bg-slate-50 border border-slate-150 p-4 rounded-lg text-xs leading-relaxed italic">
-                     <p className="font-extrabold text-slate-800 uppercase text-[9px] tracking-wide font-mono not-italic mb-1">Contractor Special Clauses / Notes:</p>
-                     "{previewQuote.notes}"
-                   </div>
-                 )}
-
-                 {previewQuote.revisionNotes && (
-                   <div className="bg-amber-50/40 border border-amber-200/60 p-4 rounded-lg text-xs leading-relaxed italic">
-                     <p className="font-extrabold text-amber-800 uppercase text-[9px] tracking-wide font-mono not-italic mb-1">Revision Amendment Justification Notes:</p>
-                     "{previewQuote.revisionNotes}"
-                   </div>
-                 )}
-
-                 {/* Signature Blocks */}
-                 <div className="grid grid-cols-2 gap-10 pt-10 text-xs text-slate-600">
-                   <div className="space-y-8">
-                     <p className="font-bold text-slate-800">Issued on behalf of Globelink Ports & Drayage Co.</p>
-                     <div className="border-b border-slate-200 w-3/4 pt-6"></div>
-                     <div>
-                       <p className="text-slate-805 font-extrabold">Authorized Commercial Analyst</p>
-                       <p className="text-[10px] text-slate-400 mt-0.5">Commercial Contracts Desk</p>
-                     </div>
-                   </div>
-                   <div className="space-y-8">
-                     <p className="font-bold text-slate-800">Accepted on behalf of Client Account</p>
-                     <div className="border-b border-slate-200 w-3/4 pt-6"></div>
-                     <div>
-                       <p className="text-slate-805 font-extrabold">Client Representative Name & Title</p>
-                       <p className="text-[10px] text-slate-400 mt-0.5">Authorized Billing Officer Signatory</p>
-                     </div>
-                   </div>
-                 </div>
-               </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+

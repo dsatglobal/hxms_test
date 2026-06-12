@@ -161,54 +161,90 @@ export interface TariffRate {
 
 export type QuotationRateItem = {
   id: string;
-  containerType: string;    // e.g. "40HC"
-  containerTypeId: string;  // from ContainerType master
-  originZoneId: string;
-  destinationZoneId: string;
-  originLocationId?: string;  // if point-to-point
+  scenario?: ScenarioType;
+  containerType?: string;
+  containerTypeId?: string;
+  containerSize?: string;
+  originZoneId?: string;
+  destinationZoneId?: string;
+  originLocationId?: string;
   destinationLocationId?: string;
+  fromLocationId?: string;
+  toLocationId?: string;
   baseRate: number;
-  currency: string;
-  returnLegRate: number;    // captured at quote time
-  returnLocationId?: string; // designated return depot
-  estimatedFuelSurcharge: number;  // FAF amount
-  applicableSurcharges: {
+  currency?: string;
+  returnLegRate?: number;
+  returnLocationId?: string;
+  estimatedFuelSurcharge?: number;
+  applicableSurcharges?: {
     surchargeCode: string;
     surchargeName: string;
     amount: number;
     calculationMethod: string;
-    isIncluded: boolean;    // included in base or extra
+    isIncluded: boolean;
   }[];
-  totalEstimatedValue: number;
-  rotRequired: boolean;     // per scenario logic
-  notes: string;
+  additionalSurcharges?: {
+    code: string;
+    amount: number;
+  }[];
+  totalEstimatedValue?: number;
+  rotRequired?: boolean;
+  notes?: string;
 }
 
 export type Quotation = {
   id: string;
-  quoteNo: string;          // e.g. "QT-IN-2026-0001"
-  regionId: string;
+  quoteNo: string;
+  regionId?: string;
+  tenantId?: string;
   customerId: string;
-  scenario: ScenarioType;
-  status: "draft" | "pending_approval" | 
-          "confirmed" | "expired" | "superseded"
+  scenario?: ScenarioType;
+  status: "draft" | "pending_approval" | "confirmed" | "expired" | "superseded";
   validFrom: string;
   validTo: string;
-  rateItems: QuotationRateItem[];  
-  // one per container type / route combination
-  totalValue: number;       // sum of all rate items
-  currency: string;
-  internalNotes: string;
-  customerNotes: string;    // printed on quote PDF
-  createdBy: string;        // user id
+  rateItems?: QuotationRateItem[];
+  rates?: QuotationRateItem[];
+  totalValue?: number;
+  currency?: string;
+  internalNotes?: string;
+  customerNotes?: string;
+  createdBy?: string;
   confirmedBy?: string;
   confirmedAt?: string;
-  clonedFromId?: string;    // if cloned
-  createdAt: string;
-  updatedAt: string;
+  clonedFromId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  // Extended commercial terms
+  notes?: string;
+  version?: number;
+  revisionNotes?: string;
+  effectiveDate?: string;
+  expiryDate?: string;
+  incoterm?: string;
+  freightResponsibility?: string;
+  paymentTermsOverride?: string;
+  offerValidUntil?: string;
+  mqcVolume?: number;
+  mqcPeriod?: 'monthly' | 'quarterly' | 'annual' | 'none';
+  isHazmatOnly?: boolean;
+  requiresGenset?: boolean;
+  demurrageFreeDays?: number;
+  demurrageFlatRate?: number;
+  detentionFreeDays?: number;
+  detentionFlatRate?: number;
+  surcharges?: SurchargeRule[];
+  applicableSurcharges?: {
+    code: string;
+    label: string;
+    value: string;
+    isNew?: boolean;
+    category?: 'fuel' | 'detention' | 'port' | 'wash' | 'other';
+  }[];
+  taxId?: string;
+  hazmatClass?: string;
 }
 
-export type JobStatus = 'pending' | 'scheduled' | 'dispatched' | 'active' | 'completed';
+export type JobStatus = 'pending' | 'scheduled' | 'dispatched' | 'active' | 'completed' | 'exception';
 
 export interface MilestoneStep {
   id: string;
@@ -228,44 +264,66 @@ export interface Job {
   tenantId: string;
   customerId: string;
   quotationId: string;
-  rateItemId: string; // references the specific rate line in quotation
+  rateItemId: string;
   scenario: ScenarioType;
   containerNo: string;
   sealNo: string;
   containerSize: ContainerSizeCode;
+  containerTypeId?: string;
+  shippingLineId?: string;
+  vesselId?: string;
   weightKg: number;
   shippingLine: string;
   vesselName: string;
   voyageNo: string;
   eta: string;
-  
+  targetDeliveryDate?: string;
+
+  // Government / customs reference numbers
+  ewayBillNo?: string;
+  customsRefNo?: string;
+  boeNo?: string;         // Bill of Entry (IMP)
+  shippingBillNo?: string; // Shipping Bill (EXP)
+
   // Locations involved in trip
   originLocationId: string;
   destinationLocationId: string;
-  emptyReturnLocationId?: string; // for IMP
-  emptyPickupLocationId?: string; // for EXP
-  
+  emptyReturnLocationId?: string;
+  emptyPickupLocationId?: string;
+
   status: JobStatus;
   driverId?: string;
   vehicleId?: string;
   scheduledTime?: string;
-  
+
   // Execution Milestones
   milestones: MilestoneStep[];
   currentMilestoneIndex: number;
-  
+
   // Dynamic Insertion
   hasDynamicInsertion: boolean;
-  dynamicInsertedJobId?: string; // ID of the next linked task
-  
+  dynamicInsertedJobId?: string;
+
   completionTime?: string;
   freeTimeExpiry?: string;
-  billingStatus?: 'pending' | 'invoiced';
+  billingStatus?: 'unbilled' | 'invoiced' | 'paid';
   extraSurchargesIncurred: Array<{
-    code: string;
-    name: string;
+    surchargeCode: string;
     amount: number;
-    reason: string;
+    description: string;
+    approvedBy?: string;
+  }>;
+
+  // Exception log
+  exceptionLog?: Array<{
+    type?: string;
+    notes?: string;
+    note?: string;
+    evidenceFlag?: boolean;
+    reportedAt?: string;
+    timestamp?: string;
+    loggedBy?: string;
+    reportedByDriverId?: string;
   }>;
 
   // Demurrage/Detention tracking
@@ -275,6 +333,9 @@ export interface Job {
   detentionLiability?: "customer" | "company" | "disputed" | null;
   detentionChargeAmount?: number;
   detentionNotes?: string;
+
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ROT {
@@ -495,7 +556,7 @@ export interface TranslationEntry {
 export interface MasterTranslation {
   id: string;
   languageCode: string;
-  masterType: "container_type" | "vendor" | "milestone" | "surcharge" | "zone_type" | "location_type";
+  masterType: "container_type" | "vendor" | "milestone" | "surcharge" | "zone_type" | "location_type" | "workflow_step";
   masterRecordId: string;
   translatedName?: string;
   translatedLabel?: string;

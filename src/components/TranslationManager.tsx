@@ -41,7 +41,7 @@ export default function TranslationManager({
       <LanguageSwitcher
         supportedLanguages={languages}
         activeLanguageCode={activeLangCode}
-        onChange={setActiveLanguageCode}
+        onChange={setActiveLangCode}
       />
 
       <div className="relative mb-4">

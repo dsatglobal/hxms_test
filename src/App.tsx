@@ -178,6 +178,9 @@ export default function App() {
   const [translations, setTranslations] = useState<TranslationEntry[]>(INITIAL_TRANSLATIONS);
   const [masterTranslations, setMasterTranslations] = useState<MasterTranslation[]>([]);
   
+  // Job number sequence
+  const [jobSequence, setJobSequence] = useState<number>(1004);
+
   // Region filter state
   const [activeRegionFilter, setActiveRegionFilter] = useState<string | "ALL">("ALL");
 
@@ -204,22 +207,24 @@ export default function App() {
     rateItemId?: string;
   } | null>(null);
 
-  // Quote Sequence Tracker
-  const [quoteSequence, setQuoteSequence] = useState(1);
-  const handleIncrementQuoteSequence = () => {
-    setQuoteSequence((prev) => prev + 1);
+  // Quote Sequence Tracker (per-region)
+  const [quoteSequence, setQuoteSequence] = useState<Record<string, number>>({ IN: 3, AE: 0 });
+  const handleIncrementQuoteSequence = (regionId: string) => {
+    setQuoteSequence(prev => ({ ...prev, [regionId]: (prev[regionId] ?? 0) + 1 }));
   };
 
   // Expiry check logic
   const checkQuotationExpiry = (quotes: Quotation[]) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().slice(0, 10);
     const updated = quotes.map(q => {
+      if ((q.status === 'draft' || q.status === 'pending_approval') && q.offerValidUntil && q.offerValidUntil < today) {
+        return { ...q, status: 'expired' as const };
+      }
       if (q.status === 'confirmed' && q.validTo < today) {
         return { ...q, status: 'expired' as const };
       }
       return q;
     });
-
     if (JSON.stringify(updated) !== JSON.stringify(quotes)) {
       setQuotations(updated);
       handleSaveTenantState('quotations', updated);
@@ -650,13 +655,31 @@ export default function App() {
     handleSaveTenantState('quotations', updated);
   };
 
+  const handleUpdateQuotation = (q: Quotation) => {
+    const updated = quotations.map(qx => qx.id === q.id ? q : qx);
+    setQuotations(updated);
+    handleSaveTenantState('quotations', updated);
+  };
+
   const handleConfirmQuotation = (quoteId: string) => {
     const updated = quotations.map(q => q.id === quoteId ? { ...q, status: 'confirmed' as const } : q);
     setQuotations(updated);
     handleSaveTenantState('quotations', updated);
   };
 
+  const handleGenerateJobNo = (): string => {
+    const year = new Date().getFullYear();
+    const seq = jobSequence;
+    setJobSequence(prev => prev + 1);
+    return `JB-${year}-${seq}`;
+  };
+
   const handleAddJob = (job: Job, rot: ROT, cn: ConsignmentNote) => {
+    const linkedQuote = quotations.find(q => q.id === job.quotationId);
+    if (linkedQuote && linkedQuote.status !== 'confirmed') {
+      alert(`Quotation ${linkedQuote.quoteNo} is not confirmed (status: ${linkedQuote.status}). Please confirm the quotation before creating a booking.`);
+      return;
+    }
     const userRegId = currentUser.regionId || 'IN';
 
     const detentionRule = surcharges.find(
@@ -748,7 +771,7 @@ export default function App() {
     let gateInTimestamp = jobObj.gateInTimestamp;
     let freeTimeExpiry = jobObj.freeTimeExpiry;
 
-    if (currentMilestone.label.includes("Loaded") || currentMilestone.label.includes("Stuffed")) {
+    if (currentMilestone.label.includes("Loaded") || currentMilestone.label.includes("Stuffed") || currentMilestone.label.includes("Container Picked") || currentMilestone.label.includes("Gate Out")) {
        gateOutTimestamp = new Date().toISOString();
        if (jobObj.freeTimeDays) {
          const expiry = new Date();
@@ -985,14 +1008,15 @@ export default function App() {
       milestones: createMilestonesForScenario('RETURN'),
       currentMilestoneIndex: 0,
       hasDynamicInsertion: false,
-      extraSurchargesIncurred: []
+      extraSurchargesIncurred: [],
+      createdAt: new Date().toISOString()
     };
 
     const updatedJobs = [newJob, ...jobs];
     setJobs(updatedJobs);
     handleSaveTenantState('jobs', updatedJobs);
-    alert('EMPTY CONTAINER RETURN SCHEDULED! Outstanding chassis now listed on Trip Planner.');
-    setActiveTab('planning');
+    alert('EMPTY CONTAINER RETURN SCHEDULED! Outstanding chassis now listed on Dispatch Console.');
+    setActiveTab('dispatch-console');
   };
 
   return (
@@ -1528,9 +1552,17 @@ export default function App() {
                 quotations={filteredQuotations}
                 customers={filteredCustomers}
                 locations={filteredLocations}
+                zones={filteredZones}
+                vessels={vessels}
                 shippingLines={shippingLines}
                 containerTypes={containerTypes}
+                surcharges={filteredSurcharges}
+                tariffs={filteredTariffs}
+                regions={regions}
+                currentUser={currentUser}
+                invoiceSettings={invoiceSettings}
                 onAddQuotation={handleAddQuotation}
+                onUpdateQuotation={handleUpdateQuotation}
                 onConfirmQuotation={handleConfirmQuotation}
                 onNavigate={(tab) => setActiveTab(tab)}
                 onConvertToBooking={(customerId, quoteId, rateItemId) => {
@@ -1539,6 +1571,7 @@ export default function App() {
                 }}
                 quoteSequence={quoteSequence}
                 onIncrementQuoteSequence={handleIncrementQuoteSequence}
+                jobs={filteredJobs}
               />
             )}
 
@@ -1552,6 +1585,14 @@ export default function App() {
                 consignmentNotes={filteredConsignmentNotes}
                 shippingLines={shippingLines}
                 containerTypes={containerTypes}
+                vessels={vessels}
+                zones={filteredZones}
+                surcharges={filteredSurcharges}
+                regions={regions}
+                currentUser={currentUser}
+                jobSequence={jobSequence}
+                onGenerateJobNo={handleGenerateJobNo}
+                invoiceSettings={invoiceSettings}
                 onAddJob={handleAddJob}
                 onConfirmRot={handleConfirmRot}
                 workflowConfigs={workflowConfigs}
@@ -1591,6 +1632,7 @@ export default function App() {
                 vehicles={filteredVehicles}
                 customers={filteredCustomers}
                 locations={filteredLocations}
+                currentUser={currentUser}
                 onAssignJob={handleAssignJobToDriver}
               />
             )}
@@ -1599,6 +1641,10 @@ export default function App() {
               <ContainerLifecycle
                 jobs={filteredJobs}
                 customers={filteredCustomers}
+                surcharges={filteredSurcharges}
+                shippingLines={shippingLines}
+                regions={regions}
+                currentUser={currentUser}
                 onTriggerReturnJob={handleTriggerReturnJob}
                 onUpdateJob={handleUpdateJob}
               />
