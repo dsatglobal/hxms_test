@@ -1,22 +1,24 @@
 import React, { useState } from 'react';
 import { Tenant, User, UserRole, SmtpConfig, EmailTemplate, Region, SupportedLanguage, TranslationEntry } from '../types';
-import { 
-  Building, 
-  Users, 
-  Mail, 
-  Database, 
-  Save, 
-  Plus, 
-  UserPlus, 
-  Lock, 
-  Eye, 
-  Cpu, 
-  FileCode, 
-  Edit, 
-  Check, 
+import {
+  Building,
+  Users,
+  Mail,
+  Database,
+  Save,
+  Plus,
+  UserPlus,
+  Lock,
+  Eye,
+  Cpu,
+  FileCode,
+  Edit,
+  Check,
   ArrowRight,
   Server,
-  Globe2
+  Globe2,
+  ClipboardCopy,
+  RefreshCw
 } from 'lucide-react';
 import TranslationManager from './TranslationManager';
 
@@ -35,6 +37,8 @@ interface AdministrationConsoleProps {
   emailTemplates: EmailTemplate[];
   onUpdateTemplate: (tpl: EmailTemplate) => void;
   regions: Region[];
+  onCopyInviteLink: (user: User) => void;
+  onResendInvite: (user: User) => void;
   // Translation support
   translations: TranslationEntry[];
   supportedLanguages: SupportedLanguage[];
@@ -56,6 +60,8 @@ export default function AdministrationConsole({
   emailTemplates,
   onUpdateTemplate,
   regions,
+  onCopyInviteLink,
+  onResendInvite,
   translations,
   supportedLanguages,
   onUpdateLanguage,
@@ -160,6 +166,8 @@ export default function AdministrationConsole({
       regionAccess = [newUserRegionId];
     }
 
+    const inviteToken = `inv-${Math.random().toString(36).slice(2, 10)}`;
+    const inviteExpiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     onAddUser({
       id: `usr-${Date.now()}`,
       name: newUserName.trim(),
@@ -168,7 +176,10 @@ export default function AdministrationConsole({
       isActive: true,
       regionId,
       regionAccess,
-      userLevel
+      userLevel,
+      status: 'invited',
+      inviteToken,
+      inviteExpiresAt,
     });
 
     setNewUserName('');
@@ -682,8 +693,8 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                         <th className="p-3">EMAIL ADDRESS</th>
                         <th className="p-3">LOGGED ROLE</th>
                         <th className="p-3">REGION</th>
-                        <th className="p-3">ACCOUNT STATE</th>
-                        <th className="p-3">SIMULATE SWITCH</th>
+                        <th className="p-3">STATUS</th>
+                        <th className="p-3">ACTIONS</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-150">
@@ -713,22 +724,51 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                             )}
                           </td>
                           <td className="p-3">
-                            <button
-                              onClick={() => handleToggleUserActive(u)}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                u.isActive ? 'bg-green-50 text-green-700 border border-green-150' : 'bg-red-50 text-red-700 border border-red-150'
-                              }`}
-                            >
-                              {u.isActive ? 'ACTIVE' : 'DEACTIVATED'}
-                            </button>
+                            {u.status === 'invited' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                                INVITED
+                              </span>
+                            ) : u.status === 'disabled' || !u.isActive ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-50 text-red-700 border border-red-200">
+                                DISABLED
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleToggleUserActive(u)}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green-50 text-green-700 border border-green-200"
+                              >
+                                ACTIVE
+                              </button>
+                            )}
                           </td>
                           <td className="p-3">
-                            <button
-                              onClick={() => onSwitchUser(u.id)}
-                              className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
-                            >
-                              Login <ArrowRight className="w-3 h-3" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {u.status === 'invited' ? (
+                                <>
+                                  <button
+                                    onClick={() => onCopyInviteLink(u)}
+                                    className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5"
+                                    title="Copy invite link"
+                                  >
+                                    <ClipboardCopy className="w-3 h-3" /> Copy Link
+                                  </button>
+                                  <button
+                                    onClick={() => onResendInvite(u)}
+                                    className="text-[10px] text-slate-500 hover:text-slate-700 font-bold flex items-center gap-0.5"
+                                    title="Resend invite"
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Resend
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => onSwitchUser(u.id)}
+                                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
+                                >
+                                  Login <ArrowRight className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}

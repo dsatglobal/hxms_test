@@ -22,6 +22,8 @@ import {
   EmailTemplate,
   WorkflowMilestoneConfig,
   PaymentRecord,
+  CustomerPayment,
+  VendorPayment,
   TariffRate,
   ScenarioType,
   SurchargeRule,
@@ -35,7 +37,8 @@ import {
   InvoiceSettings,
   SupportedLanguage,
   TranslationEntry,
-  MasterTranslation
+  MasterTranslation,
+  AuthSession
 } from './types';
 import { 
   MOCK_TENANTS, 
@@ -63,7 +66,9 @@ import {
   INITIAL_CONTAINER_TYPES,
   INITIAL_INVOICE_SETTINGS,
   INITIAL_SUPPORTED_LANGUAGES,
-  INITIAL_TRANSLATIONS
+  INITIAL_TRANSLATIONS,
+  INITIAL_CUSTOMER_PAYMENTS,
+  INITIAL_VENDOR_PAYMENTS
 } from './data';
 
 // Components
@@ -94,9 +99,17 @@ import SurchargeEngine from './components/SurchargeEngine';
 import RegionMaster from './components/RegionMaster';
 import SupportMasters from './components/SupportMasters';
 
+// Auth & onboarding
+import LoginPage from './components/LoginPage';
+import SetPasswordPage from './components/SetPasswordPage';
+import OnboardingWizard from './components/OnboardingWizard';
+import SetupChecklist from './components/SetupChecklist';
+
 // Icons
 import { 
   Settings, 
+  AlertTriangle,
+  X,
   ShieldCheck, 
   Users, 
   Truck, 
@@ -157,7 +170,16 @@ export default function App() {
   const [countries, setCountries] = useState<Country[]>(INITIAL_COUNTRIES);
   const [zoneTypes, setZoneTypes] = useState<ZoneType[]>(DEFAULT_ZONE_TYPES);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [currentUser, setCurrentUser] = useState<User>(INITIAL_USERS[0]);
+
+  // ── Auth session (per tenant, persisted in localStorage) ──
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+  const [bannerTick, setBannerTick] = useState(0);
+
+  // currentUser is DERIVED from the session — falls back only for type
+  // safety in computations; render gates below prevent unauthenticated use.
+  const sessionUser = users.find(u => u.id === session?.userId) ?? null;
+  const currentUser: User = sessionUser ?? INITIAL_USERS[0];
   const [smtpConfig, setSmtpConfig] = useState<SmtpConfig>(INITIAL_SMTP_CONFIG);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(INITIAL_EMAIL_TEMPLATES);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -180,6 +202,12 @@ export default function App() {
   
   // Job number sequence
   const [jobSequence, setJobSequence] = useState<number>(1004);
+
+  // Payments state
+  const [customerPayments, setCustomerPayments] = useState<CustomerPayment[]>(INITIAL_CUSTOMER_PAYMENTS);
+  const [vendorPayments, setVendorPayments] = useState<VendorPayment[]>(INITIAL_VENDOR_PAYMENTS);
+  const [receiptSequence, setReceiptSequence] = useState<Record<string, number>>({ IN: 3, AE: 0 });
+  const [adviceSequence, setAdviceSequence] = useState<Record<string, number>>({ IN: 2, AE: 0 });
 
   // Region filter state
   const [activeRegionFilter, setActiveRegionFilter] = useState<string | "ALL">("ALL");
@@ -354,18 +382,25 @@ export default function App() {
     // Load Users
     const localUsrs = localStorage.getItem(`${keyPrefix}_users`);
     if (localUsrs) {
-      const uParsed = JSON.parse(localUsrs);
-      setUsers(uParsed);
-      
-      const localCurUser = localStorage.getItem(`${keyPrefix}_currentuser`);
-      if (localCurUser) {
-        setCurrentUser(JSON.parse(localCurUser));
-      } else {
-        setCurrentUser(uParsed[0] || INITIAL_USERS[0]);
-      }
+      setUsers(JSON.parse(localUsrs));
     } else {
       setUsers(INITIAL_USERS);
-      setCurrentUser(INITIAL_USERS[0]);
+    }
+
+    // Load auth session for this tenant (sessions are per-tenant)
+    const rawSession = localStorage.getItem(`${keyPrefix}_session`);
+    setSession(rawSession ? JSON.parse(rawSession) : null);
+
+    // Load pending invite (simulated invite link)
+    setPendingInviteToken(localStorage.getItem(`${keyPrefix}_pendingInvite`));
+
+    // Load persisted tenant profile/onboarding overrides
+    const localTenant = localStorage.getItem(`${keyPrefix}_tenant`);
+    if (localTenant) {
+      const parsedTenant = JSON.parse(localTenant);
+      if (JSON.stringify(parsedTenant) !== JSON.stringify(activeTenant)) {
+        setActiveTenant(parsedTenant);
+      }
     }
 
     // Load SMTP
@@ -391,6 +426,14 @@ export default function App() {
     } else {
       setPayments([]);
     }
+
+    // Load CustomerPayments
+    const localCp = localStorage.getItem(`${keyPrefix}_customerpayments`);
+    setCustomerPayments(localCp ? JSON.parse(localCp) : INITIAL_CUSTOMER_PAYMENTS);
+
+    // Load VendorPayments
+    const localVp = localStorage.getItem(`${keyPrefix}_vendorpayments`);
+    setVendorPayments(localVp ? JSON.parse(localVp) : INITIAL_VENDOR_PAYMENTS);
 
     // Load Tariffs
     const localTariffs = localStorage.getItem(`${keyPrefix}_tariffs`);
@@ -484,6 +527,74 @@ export default function App() {
   const handleSaveTenantState = (type: string, data: any) => {
     const keyPrefix = `hms_db_${activeTenant.subdomain}`;
     localStorage.setItem(`${keyPrefix}_${type}`, JSON.stringify(data));
+  };
+
+  // ── Auth handlers (MOCK) ─────────────────────────────────────
+  const tenantKey = `hms_db_${activeTenant.subdomain}`;
+
+  const handleUpdateTenant = (updatedTenant: Tenant) => {
+    setActiveTenant(updatedTenant);
+    localStorage.setItem(`hms_db_${updatedTenant.subdomain}_tenant`, JSON.stringify(updatedTenant));
+    const updatedTenants = MOCK_TENANTS.map(t => t.id === updatedTenant.id ? updatedTenant : t);
+    MOCK_TENANTS.length = 0;
+    MOCK_TENANTS.push(...updatedTenants);
+  };
+
+  const handleLogin = (user: User) => {
+    const stamped = { ...user, lastLoginAt: new Date().toISOString() };
+    const updatedUsers = users.map(u => u.id === user.id ? stamped : u);
+    setUsers(updatedUsers);
+    handleSaveTenantState('users', updatedUsers);
+    const newSession: AuthSession = { userId: user.id, tenantId: activeTenant.id, loginAt: new Date().toISOString() };
+    localStorage.setItem(`${tenantKey}_session`, JSON.stringify(newSession));
+    setSession(newSession);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(`${tenantKey}_session`);
+    setSession(null);
+  };
+
+  // Demo convenience: logout + login-as in one click
+  const handleDemoLoginAs = (user: User) => {
+    handleLogin(user);
+  };
+
+  const handleCopyInviteLink = (user: User) => {
+    if (!user.inviteToken) return;
+    localStorage.setItem(`${tenantKey}_pendingInvite`, user.inviteToken);
+    setPendingInviteToken(user.inviteToken);
+    const fakeUrl = `https://${activeTenant.subdomain}.hms-saas.com/invite/${user.inviteToken}`;
+    try { navigator.clipboard?.writeText(fakeUrl); } catch { /* clipboard unavailable */ }
+    alert(`Invite link copied (demo):
+${fakeUrl}
+
+Log out to open the activation page in this browser.`);
+  };
+
+  const handleActivateInvite = (userId: string, password: string) => {
+    const updatedUsers = users.map(u =>
+      u.id === userId
+        ? { ...u, passwordHash: password, status: 'active' as const, inviteToken: undefined, inviteExpiresAt: undefined, mustChangePassword: false }
+        : u
+    );
+    setUsers(updatedUsers);
+    handleSaveTenantState('users', updatedUsers);
+    localStorage.removeItem(`${tenantKey}_pendingInvite`);
+    setPendingInviteToken(null);
+    const activated = updatedUsers.find(u => u.id === userId);
+    if (activated) handleLogin(activated);
+  };
+
+  const handleResendInvite = (user: User) => {
+    const updatedUsers = users.map(u =>
+      u.id === user.id
+        ? { ...u, inviteToken: `inv-${Math.random().toString(36).slice(2, 10)}`, inviteExpiresAt: new Date(Date.now() + 72 * 3600 * 1000).toISOString() }
+        : u
+    );
+    setUsers(updatedUsers);
+    handleSaveTenantState('users', updatedUsers);
+    alert('Invite resent ✓');
   };
 
   // State manipulation handlers
@@ -979,6 +1090,49 @@ export default function App() {
     handleSaveTenantState('invoices', updated);
   };
 
+  const handleAddCustomerPayment = (payment: CustomerPayment) => {
+    const updatedPayments = [...customerPayments, payment];
+    setCustomerPayments(updatedPayments);
+    handleSaveTenantState('customerpayments', updatedPayments);
+    // Update linked invoices
+    const updatedInvoices = invoices.map(inv => {
+      const alloc = payment.allocations.find(a => a.invoiceId === inv.id);
+      if (!alloc) return inv;
+      const newPaid = (inv.paidAmount ?? 0) + alloc.allocatedAmount;
+      const newBalance = inv.totalAmount - newPaid;
+      return {
+        ...inv,
+        paidAmount: newPaid,
+        balanceDue: newBalance,
+        status: newBalance <= 0 ? 'paid' as const : 'partial' as const,
+        paymentIds: [...(inv.paymentIds ?? []), payment.id],
+      };
+    });
+    setInvoices(updatedInvoices);
+    handleSaveTenantState('invoices', updatedInvoices);
+  };
+
+  const handleAddVendorPayment = (payment: VendorPayment) => {
+    const updated = [...vendorPayments, payment];
+    setVendorPayments(updated);
+    handleSaveTenantState('vendorpayments', updated);
+  };
+
+  const handleUpdateVendorPayment = (payment: VendorPayment) => {
+    const updated = vendorPayments.map(p => p.id === payment.id ? payment : p);
+    setVendorPayments(updated);
+    handleSaveTenantState('vendorpayments', updated);
+    if (payment.status === 'paid') {
+      const updatedJobs = jobs.map(j => {
+        const linked = payment.tripIds.some(tid => j.id === tid || j.jobNo === tid);
+        if (!linked) return j;
+        return { ...j, vendorPaymentId: payment.id, billingStatus: 'paid' as const };
+      });
+      setJobs(updatedJobs);
+      handleSaveTenantState('jobs', updatedJobs);
+    }
+  };
+
   const handleTriggerReturnJob = (jobId: string) => {
     // Generate return empty containers
     const sourceJob = jobs.find(j => j.id === jobId);
@@ -1018,6 +1172,61 @@ export default function App() {
     alert('EMPTY CONTAINER RETURN SCHEDULED! Outstanding chassis now listed on Dispatch Console.');
     setActiveTab('dispatch-console');
   };
+
+  // ── Auth render gates ───────────────────────────────────────
+  if (pendingInviteToken && !session) {
+    return (
+      <SetPasswordPage
+        tenant={activeTenant}
+        invitedUser={users.find(u => u.inviteToken === pendingInviteToken) ?? null}
+        onActivate={handleActivateInvite}
+        onCancel={() => {
+          localStorage.removeItem(`${tenantKey}_pendingInvite`);
+          setPendingInviteToken(null);
+        }}
+      />
+    );
+  }
+
+  if (!session || !sessionUser) {
+    return (
+      <LoginPage
+        tenant={activeTenant}
+        tenants={MOCK_TENANTS}
+        users={users}
+        onLogin={handleLogin}
+        onSwitchTenant={setActiveTenant}
+      />
+    );
+  }
+
+  if (sessionUser.userLevel === 'corporate_admin' && !activeTenant.onboardingComplete) {
+    return (
+      <OnboardingWizard
+        tenant={activeTenant}
+        currentUser={sessionUser}
+        regions={regions}
+        smtpConfig={smtpConfig}
+        onUpdateTenant={handleUpdateTenant}
+        onAddRegion={handleAddRegion}
+        onUpdateSmtpConfig={(cfg) => {
+          setSmtpConfig(cfg);
+          handleSaveTenantState('smtpconfig', cfg);
+        }}
+        onAddUser={(usr) => {
+          const updated = [...users, usr];
+          setUsers(updated);
+          handleSaveTenantState('users', updated);
+        }}
+        onCopyInviteLink={handleCopyInviteLink}
+        onLogout={handleLogout}
+        onFinish={() => {
+          handleUpdateTenant({ ...activeTenant, onboardingComplete: true });
+          setActiveTab('dashboard');
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col md:flex-row relative font-sans antialiased selection:bg-blue-500/20 selection:text-blue-900">
@@ -1431,27 +1640,36 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Dynamic User switcher footer */}
+        {/* User session footer: logout + demo user switcher */}
         <div id="sidebar-user-footer" className="p-4 bg-slate-950/40 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
           <div className="truncate pr-2">
-            <div className="font-bold text-white truncate max-w-[150px]">{currentUser.name}</div>
-            <div className="text-[10px] font-mono text-slate-400 truncate max-w-[150px] uppercase font-bold text-blue-400">{currentUser.role}</div>
+            <div className="font-bold text-white truncate max-w-[140px]">{currentUser.name}</div>
+            <div className="text-[10px] font-mono truncate max-w-[140px] uppercase font-bold text-blue-400">{currentUser.role}</div>
           </div>
-          <button 
-            onClick={() => {
-              // Log cycle switch back to admin or default user
-              const adm = users.find(u => u.role === 'administrator');
-              if (adm) {
-                setCurrentUser(adm);
-                handleSaveTenantState('currentuser', adm);
-                alert(`Security Terminal switched to: ${adm.name}`);
-              }
-            }}
-            className="text-slate-400 hover:text-white transition shrink-0 p-1 bg-slate-800 hover:bg-slate-700 rounded"
-            title="Switch User"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => {
+                // DEMO convenience: instant logout + login as corporate admin
+                const adm = users.find(u => u.role === 'administrator' && u.status !== 'disabled');
+                if (adm) {
+                  handleDemoLoginAs(adm);
+                  alert(`DEMO: switched session to ${adm.name}`);
+                }
+              }}
+              className="text-slate-400 hover:text-white transition p-1 bg-slate-800 hover:bg-slate-700 rounded"
+              title="DEMO: Switch User (logout + login-as admin)"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+            <button
+              id="sidebar-logout-btn"
+              onClick={handleLogout}
+              className="text-slate-400 hover:text-red-400 transition p-1 bg-slate-800 hover:bg-slate-700 rounded"
+              title="Logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
       </aside>
@@ -1467,6 +1685,40 @@ export default function App() {
             transition={{ duration: 0.25, cubicBezier: [0.16, 1, 0.3, 1] }}
           >
             {activeTab === 'dashboard' && (
+              <>
+                {/* SMTP-pending banner (dismissible) */}
+                {activeTenant.onboardingComplete && activeTenant.onboardingStatus && !activeTenant.onboardingStatus.smtp &&
+                  localStorage.getItem(`${tenantKey}_smtp_banner_dismissed`) !== '1' && (
+                  <div key={bannerTick} className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-amber-800">
+                    <span className="flex items-center gap-2 font-semibold">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      Email setup pending — configure SMTP in
+                      <button onClick={() => setActiveTab('admin-console')} className="underline font-bold hover:text-amber-900">Administration</button>
+                    </span>
+                    <button
+                      onClick={() => { localStorage.setItem(`${tenantKey}_smtp_banner_dismissed`, '1'); setBannerTick(t => t + 1); }}
+                      className="text-amber-400 hover:text-amber-700 p-0.5"
+                      title="Dismiss"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Guided region setup checklist (live-computed) */}
+                <SetupChecklist
+                  regions={regions}
+                  locations={locations}
+                  zones={zones}
+                  tariffs={tariffs}
+                  surcharges={surcharges}
+                  vehicles={vehicles}
+                  drivers={drivers}
+                  users={users}
+                  currentUser={currentUser}
+                  tenantKey={tenantKey}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
               <OverviewDashboard
                 jobs={filteredJobs}
                 customers={filteredCustomers}
@@ -1481,6 +1733,7 @@ export default function App() {
                 activeTenant={activeTenant}
                 onNavigate={(tab) => setActiveTab(tab)}
               />
+              </>
             )}
 
             {activeTab === 'rot-list' && (
@@ -1891,27 +2144,34 @@ export default function App() {
 
             {activeTab === 'payments' && (
               <PaymentsConsole
+                customerPayments={filterByRegion(customerPayments, currentUser, activeRegionFilter)}
+                vendorPayments={filterByRegion(vendorPayments, currentUser, activeRegionFilter)}
                 invoices={filteredInvoices}
-                payments={payments}
-                onAddPayment={(p) => {
-                  const updated = [p, ...payments];
-                  setPayments(updated);
-                  handleSaveTenantState('payments', updated);
-                }}
-                onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
+                jobs={filteredJobs}
+                customers={filteredCustomers}
+                vendors={filteredVendors}
+                regions={regions}
+                currentUser={currentUser}
+                invoiceSettings={invoiceSettings}
+                activeTenant={activeTenant}
+                receiptSequence={receiptSequence}
+                adviceSequence={adviceSequence}
+                onAddCustomerPayment={handleAddCustomerPayment}
+                onAddVendorPayment={handleAddVendorPayment}
+                onUpdateVendorPayment={handleUpdateVendorPayment}
+                onIncrementReceiptSequence={(regionId) =>
+                  setReceiptSequence(prev => ({ ...prev, [regionId]: (prev[regionId] ?? 0) + 1 }))
+                }
+                onIncrementAdviceSequence={(regionId) =>
+                  setAdviceSequence(prev => ({ ...prev, [regionId]: (prev[regionId] ?? 0) + 1 }))
+                }
               />
             )}
 
             {activeTab === 'admin-console' && (
               <AdministrationConsole
                 activeTenant={activeTenant}
-                onUpdateTenant={(updatedTenant) => {
-                  setActiveTenant(updatedTenant);
-                  // Persist in memory mock tenants array
-                  const updatedTenants = MOCK_TENANTS.map(t => t.id === updatedTenant.id ? updatedTenant : t);
-                  MOCK_TENANTS.length = 0;
-                  MOCK_TENANTS.push(...updatedTenants);
-                }}
+                onUpdateTenant={handleUpdateTenant}
                 users={users}
                 currentUser={currentUser}
                 regions={regions}
@@ -1926,13 +2186,19 @@ export default function App() {
                   handleSaveTenantState('users', updated);
                 }}
                 onSwitchUser={(userId) => {
+                  // DEMO: logout + login-as in one click
                   const u = users.find(item => item.id === userId);
                   if (u) {
-                    setCurrentUser(u);
-                    handleSaveTenantState('currentuser', u);
-                    alert(`Switched active profile session to: ${u.name} (${u.role})`);
+                    if (u.status === 'invited') {
+                      alert('This account is still pending invite activation.');
+                      return;
+                    }
+                    handleDemoLoginAs(u);
+                    alert(`DEMO: switched session to ${u.name} (${u.role})`);
                   }
                 }}
+                onCopyInviteLink={handleCopyInviteLink}
+                onResendInvite={handleResendInvite}
                 smtpConfig={smtpConfig}
                 onUpdateSmtpConfig={(cfg) => {
                   setSmtpConfig(cfg);

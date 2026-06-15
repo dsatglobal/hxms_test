@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate, Region, Country, ShippingLine, Vessel, Vendor, ContainerType, InvoiceSettings, SupportedLanguage, TranslationEntry } from './types';
+import { Tenant, Customer, LocationGeo, Vehicle, Driver, SurchargeRule, TariffRate, Quotation, Job, MilestoneStep, ScenarioType, ROT, ConsignmentNote, Zone, ZoneType, User, SmtpConfig, EmailTemplate, Region, Country, ShippingLine, Vessel, Vendor, ContainerType, InvoiceSettings, SupportedLanguage, TranslationEntry, CustomerPayment, VendorPayment } from './types';
 
 export const INITIAL_REGIONS: Region[] = [
   { 
@@ -103,7 +103,9 @@ export const MOCK_TENANTS: Tenant[] = [
     currency: 'USD',
     weightUnit: 'KG',
     baseTariffsEnabled: true,
-    reportingCurrency: "USD"
+    reportingCurrency: "USD",
+    onboardingStatus: { companyProfile: false, firstRegion: false, smtp: false, firstRegionAdmin: false },
+    onboardingComplete: false
   },
   {
     id: 'tenant-2',
@@ -115,7 +117,9 @@ export const MOCK_TENANTS: Tenant[] = [
     currency: 'SGD',
     weightUnit: 'KG',
     baseTariffsEnabled: true,
-    reportingCurrency: "USD"
+    reportingCurrency: "USD",
+    onboardingStatus: { companyProfile: true, firstRegion: true, smtp: true, firstRegionAdmin: true },
+    onboardingComplete: true
   },
   {
     id: 'tenant-3',
@@ -127,7 +131,9 @@ export const MOCK_TENANTS: Tenant[] = [
     currency: 'EUR',
     weightUnit: 'LBS',
     baseTariffsEnabled: false,
-    reportingCurrency: "USD"
+    reportingCurrency: "USD",
+    onboardingStatus: { companyProfile: true, firstRegion: true, smtp: true, firstRegionAdmin: true },
+    onboardingComplete: true
   }
 ];
 
@@ -781,12 +787,15 @@ export const INITIAL_USERS: User[] = [
   { 
     id: 'user-admin', 
     name: 'Office Administrator', 
-    email: 'admin@atlas-haulage.com', 
+    email: 'admin@atlas.com', 
     role: 'administrator', 
     isActive: true,
     regionId: null,
     regionAccess: ["ALL"],
-    userLevel: "corporate_admin"
+    userLevel: "corporate_admin",
+    passwordHash: 'admin123', // MOCK — plain text for demo
+    status: 'active',
+    mustChangePassword: false
   },
   { 
     id: 'user-dispatch', 
@@ -796,7 +805,9 @@ export const INITIAL_USERS: User[] = [
     isActive: true,
     regionId: 'IN',
     regionAccess: ['IN'],
-    userLevel: "region_user"
+    userLevel: "region_user",
+    passwordHash: 'demo123', // MOCK
+    status: 'active'
   },
   { 
     id: 'user-billing', 
@@ -806,7 +817,9 @@ export const INITIAL_USERS: User[] = [
     isActive: true,
     regionId: 'UAE',
     regionAccess: ['UAE'],
-    userLevel: "region_user"
+    userLevel: "region_user",
+    passwordHash: 'demo123', // MOCK
+    status: 'active'
   },
   { 
     id: 'user-driver', 
@@ -816,7 +829,9 @@ export const INITIAL_USERS: User[] = [
     isActive: true,
     regionId: 'IN',
     regionAccess: ['IN'],
-    userLevel: "region_user"
+    userLevel: "region_user",
+    passwordHash: 'demo123', // MOCK
+    status: 'active'
   }
 ];
 
@@ -1146,5 +1161,105 @@ export const INITIAL_TRANSLATIONS: TranslationEntry[] = [
   { id: "tr-ar-cn-placeofloading", languageCode: "ar", category: "document_field", key: "place_of_loading", englishValue: "Place of Loading", translatedValue: "مكان التحميل", documentType: "CN", isVerified: true },
   { id: "tr-ar-cn-placeofdelivery", languageCode: "ar", category: "document_field", key: "place_of_delivery", englishValue: "Place of Delivery", translatedValue: "مكان التسليم", documentType: "CN", isVerified: true },
   { id: "tr-ar-cn-signature", languageCode: "ar", category: "document_field", key: "signature", englishValue: "Signature", translatedValue: "التوقيع", documentType: "CN", isVerified: true },
+];
+
+export const INITIAL_CUSTOMER_PAYMENTS: CustomerPayment[] = [
+  {
+    id: 'cp-001',
+    receiptNo: 'RCP-IN-2026-0001',
+    regionId: 'IN',
+    customerId: 'cust-4',
+    invoiceIds: ['inv-in-001'],
+    allocations: [
+      { invoiceId: 'inv-in-001', invoiceNo: 'INV-IN-2026-0001', allocatedAmount: 47000 }
+    ],
+    totalAmount: 47000,
+    currency: 'INR',
+    paymentDate: '2026-06-05',
+    paymentMethod: 'bank_transfer',
+    referenceNo: 'HDFC/20260605/447821',
+    status: 'allocated',
+    notes: 'Full settlement of June invoice',
+    createdBy: 'usr-billing-in',
+    createdAt: '2026-06-05T10:30:00Z',
+  },
+  {
+    id: 'cp-002',
+    receiptNo: 'RCP-IN-2026-0002',
+    regionId: 'IN',
+    customerId: 'cust-5',
+    invoiceIds: ['inv-in-002'],
+    allocations: [
+      { invoiceId: 'inv-in-002', invoiceNo: 'INV-IN-2026-0002', allocatedAmount: 25000 }
+    ],
+    totalAmount: 25000,
+    currency: 'INR',
+    paymentDate: '2026-06-10',
+    paymentMethod: 'cheque',
+    referenceNo: 'CHQ-007842',
+    status: 'partial',
+    notes: 'Partial payment; balance ₹20,000 to follow',
+    createdBy: 'usr-billing-in',
+    createdAt: '2026-06-10T14:15:00Z',
+  },
+  {
+    id: 'cp-003',
+    receiptNo: 'RCP-IN-2026-0003',
+    regionId: 'IN',
+    customerId: 'cust-1',
+    invoiceIds: [],
+    allocations: [],
+    totalAmount: 38000,
+    currency: 'INR',
+    paymentDate: '2026-06-12',
+    paymentMethod: 'bank_transfer',
+    referenceNo: 'ICICI/20260612/993004',
+    status: 'unallocated',
+    notes: 'Payment received — awaiting invoice matching',
+    createdBy: 'usr-billing-in',
+    createdAt: '2026-06-12T09:00:00Z',
+  },
+];
+
+export const INITIAL_VENDOR_PAYMENTS: VendorPayment[] = [
+  {
+    id: 'vp-001',
+    adviceNo: 'PA-IN-2026-0001',
+    regionId: 'IN',
+    vendorId: 'vend-1',
+    tripIds: ['JOB-IN-2026-0001', 'JOB-IN-2026-0002', 'JOB-IN-2026-0003'],
+    lineItems: [
+      { tripId: 'JOB-IN-2026-0001', jobNo: 'JOB-IN-2026-0001', description: 'IMP laden leg — Chennai Port to Guindy', buyRate: 12000, surchargesBuy: 1500, totalPayable: 13500 },
+      { tripId: 'JOB-IN-2026-0002', jobNo: 'JOB-IN-2026-0002', description: 'EXP laden leg — Coimbatore to Chennai Port', buyRate: 11000, surchargesBuy: 1000, totalPayable: 12000 },
+      { tripId: 'JOB-IN-2026-0003', jobNo: 'JOB-IN-2026-0003', description: 'EMTY repositioning — Guindy to Chennai Depot', buyRate: 5500, surchargesBuy: 500, totalPayable: 6000 },
+    ],
+    subtotal: 31500,
+    currency: 'INR',
+    paymentDate: '2026-06-08',
+    paymentMethod: 'bank_transfer',
+    referenceNo: 'HDFC/20260608/VND-0091',
+    status: 'paid',
+    approvedBy: 'admin@atlas.com',
+    approvedAt: '2026-06-07T09:00:00Z',
+    paidAt: '2026-06-08T11:30:00Z',
+    createdBy: 'admin@atlas.com',
+    createdAt: '2026-06-06T16:00:00Z',
+  },
+  {
+    id: 'vp-002',
+    adviceNo: 'PA-IN-2026-0002',
+    regionId: 'IN',
+    vendorId: 'vend-2',
+    tripIds: ['JOB-IN-2026-0004', 'JOB-IN-2026-0005'],
+    lineItems: [
+      { tripId: 'JOB-IN-2026-0004', jobNo: 'JOB-IN-2026-0004', description: 'Inland laden leg — Pune to JNPT', buyRate: 14000, surchargesBuy: 2000, totalPayable: 16000 },
+      { tripId: 'JOB-IN-2026-0005', jobNo: 'JOB-IN-2026-0005', description: 'RETURN empty — JNPT to Pune Depot', buyRate: 6500, surchargesBuy: 500, totalPayable: 7000 },
+    ],
+    subtotal: 23000,
+    currency: 'INR',
+    status: 'pending',
+    createdBy: 'admin@atlas.com',
+    createdAt: '2026-06-13T10:00:00Z',
+  },
 ];
 

@@ -61,6 +61,15 @@ export interface Tenant {
   weightUnit: 'KG' | 'LBS';
   baseTariffsEnabled: boolean;
   reportingCurrency?: string; // default "USD"
+  onboardingStatus?: {
+    companyProfile: boolean;
+    firstRegion: boolean;
+    smtp: boolean;            // skippable — not required for completion
+    firstRegionAdmin: boolean;
+  };
+  // true when all NON-skippable steps done:
+  // companyProfile && firstRegion && firstRegionAdmin (smtp NOT required)
+  onboardingComplete?: boolean;
 }
 
 export interface Customer {
@@ -307,6 +316,11 @@ export interface Job {
   completionTime?: string;
   freeTimeExpiry?: string;
   billingStatus?: 'unbilled' | 'invoiced' | 'paid';
+  revenueAmount?: number;
+  costAmount?: number;
+  grossMargin?: number;
+  marginPercent?: number;
+  vendorPaymentId?: string;
   extraSurchargesIncurred: Array<{
     surchargeCode: string;
     amount: number;
@@ -396,6 +410,9 @@ export interface Invoice {
     description: string;
     amount: number;
   }>;
+  paidAmount?: number;
+  balanceDue?: number;
+  paymentIds?: string[];
 }
 
 export interface LiveTruckPosition {
@@ -423,7 +440,20 @@ export interface User {
   regionId: string | null;
   regionAccess: string[];
   userLevel: "corporate_admin" | "region_admin" | "region_user" | "driver";
+  // ── Auth (MOCK — passwords stored in plain text for demo only) ──
+  passwordHash?: string;
+  status?: "invited" | "active" | "disabled";
+  inviteToken?: string;
+  inviteExpiresAt?: string;
+  lastLoginAt?: string;
+  mustChangePassword?: boolean;
 }
+
+export type AuthSession = {
+  userId: string;
+  tenantId: string;
+  loginAt: string;
+};
 
 export interface Zone {
   id: string;
@@ -551,6 +581,56 @@ export interface TranslationEntry {
   translatedValue: string; // e.g. "பெறுநர்" (Tamil)
   documentType?: string;  // "CN", "ROT", "Invoice", "ALL"
   isVerified: boolean;    // human verified vs auto-translated
+}
+
+export interface CustomerPayment {
+  id: string;
+  receiptNo: string;
+  regionId: string;
+  customerId: string;
+  invoiceIds: string[];
+  allocations: {
+    invoiceId: string;
+    invoiceNo: string;
+    allocatedAmount: number;
+  }[];
+  totalAmount: number;
+  currency: string;
+  paymentDate: string;
+  paymentMethod: 'bank_transfer' | 'cheque' | 'cash' | 'online';
+  referenceNo: string;
+  status: 'allocated' | 'partial' | 'unallocated';
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface VendorPayment {
+  id: string;
+  adviceNo: string;
+  regionId: string;
+  vendorId: string;
+  tripIds: string[];
+  lineItems: {
+    tripId: string;
+    jobNo: string;
+    description: string;
+    buyRate: number;
+    surchargesBuy: number;
+    totalPayable: number;
+  }[];
+  subtotal: number;
+  currency: string;
+  paymentDate?: string;
+  paymentMethod?: string;
+  referenceNo?: string;
+  status: 'pending' | 'approved' | 'paid';
+  approvedBy?: string;
+  approvedAt?: string;
+  paidAt?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface MasterTranslation {
