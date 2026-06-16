@@ -133,7 +133,7 @@ export default function JobBooker({
 
   const activeRateItem = useMemo(() => {
     if (!activeQuote) return null;
-    return (activeQuote.rates ?? activeQuote.rateItems ?? []).find(r => r.id === selectedRateItemId);
+    return (activeQuote.rateItems ?? []).find(r => r.id === selectedRateItemId);
   }, [activeQuote, selectedRateItemId]);
 
   const selectedJob = useMemo(() =>
@@ -403,7 +403,7 @@ export default function JobBooker({
                 <option value="">-- Select quotation --</option>
                 {filteredQuotes.map(q => (
                   <option key={q.id} value={q.id}>
-                    {q.quoteNo} (expires {q.expiryDate ?? q.validTo})
+                    {q.quoteNo} (expires {q.validTo})
                   </option>
                 ))}
               </select>
@@ -418,7 +418,7 @@ export default function JobBooker({
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600">Rate Leg *</label>
                 <div className="space-y-2">
-                  {(activeQuote.rates ?? activeQuote.rateItems ?? []).map(r => {
+                  {(activeQuote.rateItems ?? []).map(r => {
                     const fromL = loc(r.fromLocationId);
                     const toL = loc(r.toLocationId);
                     const isSelected = selectedRateItemId === r.id;
@@ -707,7 +707,7 @@ export default function JobBooker({
     const origin = loc(job.originLocationId);
     const dest = loc(job.destinationLocationId);
     const quote = quotations.find(q => q.id === job.quotationId);
-    const rateLine = (quote?.rates ?? quote?.rateItems ?? []).find(r => r.id === job.rateItemId);
+    const rateLine = (quote?.rateItems ?? []).find(r => r.id === job.rateItemId);
     const shippingLine = shippingLines.find(sl => sl.id === job.shippingLineId) ?? shippingLines.find(sl => sl.name === job.shippingLine);
 
     const DETAIL_TABS: { id: DetailTab; label: string; icon: React.ReactNode }[] = [

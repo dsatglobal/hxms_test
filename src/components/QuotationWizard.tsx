@@ -515,7 +515,7 @@ export default function QuotationWizard({
     {
       key: 'rates', header: 'Rate Summary',
       render: q => {
-        const items = q.rateItems ?? q.rates ?? [];
+        const items = q.rateItems ?? [];
         const first = items[0];
         if (!first) return <span className={T.cellMuted}>—</span>;
         return (

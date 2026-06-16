@@ -150,7 +150,7 @@ export default function BillingInvoiceConsole({
 
     let baseRate = job.scenario === 'IMP' ? 520 : job.scenario === 'EXP' ? 400 : 300;
     const quoteObj = quotations.find(q => q.id === job.quotationId);
-    const rateLine = (quoteObj?.rates ?? quoteObj?.rateItems ?? []).find(r => r.id === job.rateItemId);
+    const rateLine = (quoteObj?.rateItems ?? []).find(r => r.id === job.rateItemId);
     if (rateLine) baseRate = rateLine.baseRate;
     setFormBaseRate(baseRate);
 

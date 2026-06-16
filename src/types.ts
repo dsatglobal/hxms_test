@@ -212,7 +212,6 @@ export type Quotation = {
   validFrom: string;
   validTo: string;
   rateItems?: QuotationRateItem[];
-  rates?: QuotationRateItem[];
   totalValue?: number;
   currency?: string;
   internalNotes?: string;
@@ -224,11 +223,6 @@ export type Quotation = {
   createdAt?: string;
   updatedAt?: string;
   // Extended commercial terms
-  notes?: string;
-  version?: number;
-  revisionNotes?: string;
-  effectiveDate?: string;
-  expiryDate?: string;
   incoterm?: string;
   freightResponsibility?: string;
   paymentTermsOverride?: string;
@@ -241,14 +235,6 @@ export type Quotation = {
   demurrageFlatRate?: number;
   detentionFreeDays?: number;
   detentionFlatRate?: number;
-  surcharges?: SurchargeRule[];
-  applicableSurcharges?: {
-    code: string;
-    label: string;
-    value: string;
-    isNew?: boolean;
-    category?: 'fuel' | 'detention' | 'port' | 'wash' | 'other';
-  }[];
   taxId?: string;
   hazmatClass?: string;
 }
