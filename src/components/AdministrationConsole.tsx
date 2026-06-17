@@ -4,14 +4,13 @@ import {
   Building,
   Users,
   Mail,
-  Database,
+
   Save,
   Plus,
   UserPlus,
   Lock,
   Eye,
-  Cpu,
-  FileCode,
+
   Edit,
   Check,
   ArrowRight,
@@ -69,7 +68,7 @@ export default function AdministrationConsole({
   onUpdateTranslation
 }: AdministrationConsoleProps) {
 
-  const [activeAdminTab, setActiveAdminTab] = useState<'profile' | 'users' | 'smtp' | 'postgres' | 'translation'>('profile');
+  const [activeAdminTab, setActiveAdminTab] = useState<'profile' | 'users' | 'smtp' | 'translation'>('profile');
 
   // Company Profile states
   const [tenantName, setTenantName] = useState(activeTenant.name);
@@ -206,172 +205,6 @@ export default function AdministrationConsole({
     });
   };
 
-  // Compile full enterprise PostgreSQL schema DDL Script
-  const generatePostgresDDL = () => {
-    return `-- =================================================================================
--- PRECISE ENTERPRISE HAULAGE LOGISTICS SAAS MANAGEMENT PLATFORM SCHEMA DDL
--- TARGET ENGINE: PostgreSQL 14+ (Compatible with Amazon Aurora or Google Cloud SQL)
--- GENERATION TIMESTAMP: ${new Date().toISOString()}
--- =================================================================================
-
--- 1. SYSTEM BASE TENANCY CONTROL
-CREATE TABLE saas_tenants (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    subdomain VARCHAR(100) UNIQUE NOT NULL,
-    logo_color VARCHAR(10) DEFAULT '#3b82f6',
-    primary_color VARCHAR(10) DEFAULT '#0f172a',
-    currency VARCHAR(10) DEFAULT 'USD',
-    weight_unit VARCHAR(10) CHECK (weight_unit IN ('KG', 'LBS')) DEFAULT 'KG',
-    base_tariffs_enabled BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. USER ROLE-BASED ACCESS CONTROL (RBAC)
-CREATE TYPE user_role_enum AS ENUM ('administrator', 'dispatcher', 'billing', 'driver_emulator');
-
-CREATE TABLE system_users (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    role user_role_enum NOT NULL DEFAULT 'dispatcher',
-    is_active BOOLEAN DEFAULT TRUE,
-    tenant_id VARCHAR(50) REFERENCES saas_tenants(id) ON DELETE CASCADE
-);
-
--- 3. GLOBAL SPATIAL & REGIONAL REGISTRY
-CREATE TABLE logistics_regions (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    code VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE logistics_countries (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    code VARCHAR(10) UNIQUE NOT NULL, -- ISO 2-letter standard
-    region_id VARCHAR(50) REFERENCES logistics_regions(id) ON DELETE RESTRICT,
-    currency VARCHAR(10) DEFAULT 'USD',
-    tax_rate NUMERIC(5, 2) DEFAULT 0.00,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 4. GEOSPATIAL LOGISTICS ZONES
-CREATE TABLE logistics_zones (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) UNIQUE NOT NULL,
-    code VARCHAR(50) UNIQUE NOT NULL,
-    type VARCHAR(150) NOT NULL DEFAULT 'Industrial Corridor',
-    description TEXT,
-    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 5. CONTAINER TERMINAL & CUSTOMER POINT STATIONS
-CREATE TABLE logistics_locations (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    code VARCHAR(50) UNIQUE NOT NULL,
-    type VARCHAR(30) CHECK (type IN ('port', 'depot', 'customer', 'warehouse')),
-    latitude NUMERIC(10, 6),
-    longitude NUMERIC(10, 6),
-    zone_name VARCHAR(255) REFERENCES logistics_zones(name),
-    geofence_radius_meters INT DEFAULT 300,
-    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- 6. FLEET REGISTRY (ASSET ASYNC INDEXING)
-CREATE TABLE fleet_vehicles (
-    id VARCHAR(50) PRIMARY KEY,
-    plate_number VARCHAR(30) UNIQUE NOT NULL,
-    type VARCHAR(30) CHECK (type IN ('skeletal', 'flatbed', 'sideloader', 'tipper', 'custom')),
-    owner_type VARCHAR(30) CHECK (owner_type IN ('in-house', 'subcontract')),
-    road_tax_expiry DATE NOT NULL,
-    maintenance_alert BOOLEAN DEFAULT FALSE
-);
-
-CREATE TABLE fleet_drivers (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    license_number VARCHAR(100) UNIQUE NOT NULL,
-    license_expiry DATE NOT NULL,
-    port_pass_number VARCHAR(100),
-    phone VARCHAR(30),
-    assigned_vehicle_id VARCHAR(50) REFERENCES fleet_vehicles(id) ON DELETE SET NULL,
-    current_status VARCHAR(30) CHECK (current_status IN ('idle', 'assigned', 'in-transit', 'at-site', 'completed')) DEFAULT 'idle'
-);
-
--- 7. COMMERCIAL CUSTOMER AUDIT
-CREATE TABLE customer_masters (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    tax_id VARCHAR(100) NOT NULL,
-    address TEXT,
-    credit_limit NUMERIC(12, 2) DEFAULT 50000.00,
-    payment_terms VARCHAR(50) DEFAULT 'Net 30',
-    email VARCHAR(255),
-    phone VARCHAR(50),
-    country_id VARCHAR(50) REFERENCES logistics_countries(id) ON DELETE SET NULL
-);
-
--- 8. BASE TARIFF & BID VALUE MATRIX
-CREATE TABLE billing_tariffs (
-    id VARCHAR(50) PRIMARY KEY,
-    scenario VARCHAR(10) CHECK (scenario IN ('IMP', 'EXP', 'Inland', 'EMTY', 'RETURN')),
-    from_zone VARCHAR(100),
-    to_zone VARCHAR(100),
-    size_code VARCHAR(10) CHECK (size_code IN ('20GP', '40GP', '40HC')),
-    amount NUMERIC(10, 2) CHECK (amount > 0),
-    CONSTRAINT unique_tariff_index UNIQUE (scenario, from_zone, to_zone, size_code)
-);
-
--- 9. JOB EXECUTION PIPELINE
-CREATE TABLE dispatch_jobs (
-    id VARCHAR(50) PRIMARY KEY,
-    job_no VARCHAR(50) UNIQUE NOT NULL,
-    customer_id VARCHAR(50) REFERENCES customer_masters(id),
-    scenario VARCHAR(10) NOT NULL,
-    container_no VARCHAR(100) NOT NULL,
-    seal_no VARCHAR(100),
-    container_size VARCHAR(10) NOT NULL,
-    weight_kg INT NOT NULL,
-    shipping_line VARCHAR(150),
-    vessel_name VARCHAR(150),
-    voyage_no VARCHAR(50),
-    eta DATE,
-    origin_location_id VARCHAR(50) REFERENCES logistics_locations(id),
-    destination_location_id VARCHAR(50) REFERENCES logistics_locations(id),
-    status VARCHAR(30) DEFAULT 'pending',
-    driver_id VARCHAR(50) REFERENCES fleet_drivers(id),
-    vehicle_id VARCHAR(50) REFERENCES fleet_vehicles(id),
-    scheduled_time TIMESTAMP,
-    current_milestone_index INT DEFAULT 0,
-    billing_status VARCHAR(20) DEFAULT 'pending'
-);
-
--- 10. HISTORICAL ACCOUNTING CONSOLE
-CREATE TABLE custom_invoices (
-    id VARCHAR(50) PRIMARY KEY,
-    invoice_no VARCHAR(50) UNIQUE NOT NULL,
-    job_id VARCHAR(50) REFERENCES dispatch_jobs(id),
-    customer_id VARCHAR(50) REFERENCES customer_masters(id),
-    issue_date DATE NOT NULL,
-    due_date DATE NOT NULL,
-    status VARCHAR(20) DEFAULT 'unpaid',
-    subtotal NUMERIC(10, 2),
-    tax_amount NUMERIC(10, 2),
-    total_amount NUMERIC(10, 2)
-);
-
--- 11. REALTIME AUDIT LOGGING INDEX
-CREATE INDEX idx_jobs_status ON dispatch_jobs(status);
-CREATE INDEX idx_vehicles_plate ON fleet_vehicles(plate_number);
-CREATE INDEX idx_locations_type ON logistics_locations(type);
-`;
-  };
 
   return (
     <div id="admin-console-container" className="space-y-6">
@@ -415,17 +248,6 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
           }`}
         >
           SMTP Alerts Config
-        </button>
-
-        <button
-          onClick={() => setActiveAdminTab('postgres')}
-          className={`pb-3 border-b-2 transition ${
-            activeAdminTab === 'postgres' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <span className="flex items-center gap-1">
-            <Database className="w-3.5 h-3.5 text-blue-600" /> PostgreSQL Schema Generator
-          </span>
         </button>
 
         <button
@@ -646,7 +468,6 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
                         <option value="billing">billing</option>
                         <option value="operations">operations</option>
                         <option value="driver">driver</option>
-                        <option value="driver_emulator">driver emulator</option>
                       </select>
                     </div>
 
@@ -981,44 +802,6 @@ CREATE INDEX idx_locations_type ON logistics_locations(type);
           </div>
         )}
 
-        {/* Tab 4: PostgreSQL Database Schema Generator DDL */}
-        {activeAdminTab === 'postgres' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-950 p-6 rounded-lg text-slate-300 space-y-4">
-              
-              <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                <div>
-                  <h3 className="font-mono text-sm text-blue-400 uppercase tracking-widest font-extrabold flex items-center gap-1.5">
-                    <Cpu className="w-5 h-5" /> PostgreSQL Schema Generation Tool DDL
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Export high-fidelity, relational PostgreSQL table definitions matching the active TypeScript application models exactly.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(generatePostgresDDL());
-                    alert('PostgreSQL detailed DDL script copied to clipboard successfully!');
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 font-sans font-bold text-white text-xs px-3.5 py-1.5 rounded-lg flex items-center gap-1 shadow"
-                >
-                  <FileCode className="w-4 h-4" /> Copy SQL Script
-                </button>
-              </div>
-
-              {/* DDL Code Block */}
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 font-mono text-xs text-green-400 overflow-x-auto max-h-[420px] shadow-inner select-all leading-normal">
-                <pre>{generatePostgresDDL()}</pre>
-              </div>
-
-              <div id="postgres-ddl-notes" className="text-[11px] text-slate-400 leading-normal bg-slate-950/20 p-3 rounded font-mono border border-slate-800/60">
-                <strong>Deployment Notes:</strong> These definitions are optimized for production. Included elements consist of isolated indices for instant job lookups, cascade parameters for transactional security, and key check bounds ensuring weight-tolerances match global legal standards.
-              </div>
-
-            </div>
-          </div>
-        )}
 
         {/* Tab 5: Dynamic Translation Management Console */}
         {activeAdminTab === 'translation' && (

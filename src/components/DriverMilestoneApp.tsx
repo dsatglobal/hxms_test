@@ -23,6 +23,7 @@ interface DriverMilestoneAppProps {
   jobs: Job[];
   drivers: Driver[];
   vehicles: Vehicle[];
+  previewDriverId?: string;
   onUpdateMilestone: (jobId: string, milestoneId: string, evidenceUrl?: string, signatureName?: string) => void;
 }
 
@@ -30,11 +31,14 @@ export default function DriverMilestoneApp({
   jobs,
   drivers,
   vehicles,
+  previewDriverId,
   onUpdateMilestone
 }: DriverMilestoneAppProps) {
-  // Focus on Job 1 (JB-2026-1001) representing Bob Johnson
-  const activeJob = jobs.find(j => j.id === 'job-1');
-  const bobDriver = drivers.find(d => d.id === 'drv-1');
+  const targetDriverId = previewDriverId ?? 'drv-1';
+  const activeJob = jobs.find(j => j.driverId === targetDriverId && j.status === 'active')
+    ?? jobs.find(j => j.driverId === targetDriverId)
+    ?? jobs.find(j => j.id === 'job-1');
+  const bobDriver = drivers.find(d => d.id === targetDriverId) ?? drivers.find(d => d.id === 'drv-1');
   const bobVeh = vehicles.find(v => v.id === bobDriver?.assignedVehicleId);
 
   // Sign State block

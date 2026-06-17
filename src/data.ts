@@ -825,7 +825,7 @@ export const INITIAL_USERS: User[] = [
     id: 'user-driver', 
     name: 'Bob Johnson', 
     email: 'driver@atlas-haulage.com', 
-    role: 'driver_emulator', 
+    role: 'driver', 
     isActive: true,
     regionId: 'IN',
     regionAccess: ['IN'],

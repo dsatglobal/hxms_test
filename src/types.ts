@@ -414,7 +414,7 @@ export interface LiveTruckPosition {
   isReroutedForDynamicJob: boolean;
 }
 
-export type UserRole = 'administrator' | 'region_admin' | 'dispatcher' | 'billing' | 'driver_emulator' | 'operations' | 'driver';
+export type UserRole = 'administrator' | 'region_admin' | 'dispatcher' | 'billing' | 'operations' | 'driver';
 
 export interface User {
   id: string;

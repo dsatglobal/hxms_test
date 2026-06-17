@@ -151,6 +151,7 @@ export default function App() {
   // SaaS Multi-tenancy Subdomain State
   const [activeTenant, setActiveTenant] = useState<Tenant>(MOCK_TENANTS[0]);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [previewDriverId, setPreviewDriverId] = useState<string>('');
   
   // Isolated Tenant Database States
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1622,20 +1623,22 @@ Log out to open the activation page in this browser.`);
               </div>
             )}
 
-            {/* GROUP 6 — (no label, bottom) */}
-            <div className="space-y-1 border-t border-slate-800/50 pt-2 font-sans">
-              <button
-                id="menu-emulator"
-                onClick={() => setActiveTab('emulator')}
-                className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
-                   activeTab === 'emulator' 
-                    ? 'bg-blue-500/25 text-blue-400 border-l-4 border-blue-500' 
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/30'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5 text-blue-450 text-blue-400" /> Driver App (Demo)
-              </button>
-            </div>
+            {/* GROUP 6 — Preview as Driver (admin only) */}
+            {(currentUser.role === 'administrator' || currentUser.role === 'region_admin') && (
+              <div className="space-y-1 border-t border-slate-800/50 pt-2 font-sans">
+                <button
+                  id="menu-emulator"
+                  onClick={() => setActiveTab('emulator')}
+                  className={`w-full text-left px-4 py-1.5 rounded-md text-[11px] font-bold flex items-center gap-2 transition ${
+                     activeTab === 'emulator'
+                      ? 'bg-blue-500/25 text-blue-400 border-l-4 border-blue-500'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/30'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-blue-450 text-blue-400" /> Preview as Driver
+                </button>
+              </div>
+            )}
 
           </nav>
         </div>
@@ -1921,12 +1924,29 @@ Log out to open the activation page in this browser.`);
             )}
 
             {activeTab === 'emulator' && (
-              <DriverMilestoneApp
-                jobs={filteredJobs}
-                drivers={filteredDrivers}
-                vehicles={filteredVehicles}
-                onUpdateMilestone={handleUpdateMilestone}
-              />
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  <span className="font-bold uppercase text-xs tracking-wider">Preview as Driver</span>
+                  <select
+                    value={previewDriverId}
+                    onChange={e => setPreviewDriverId(e.target.value)}
+                    className="bg-white border border-amber-300 rounded px-2 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    <option value="">— Select driver —</option>
+                    {filteredDrivers.map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-amber-600">This is a read-only preview — no role change occurs.</span>
+                </div>
+                <DriverMilestoneApp
+                  jobs={filteredJobs}
+                  drivers={filteredDrivers}
+                  vehicles={filteredVehicles}
+                  previewDriverId={previewDriverId || undefined}
+                  onUpdateMilestone={handleUpdateMilestone}
+                />
+              </div>
             )}
 
             {/* New Systems Administrations Panels */}
